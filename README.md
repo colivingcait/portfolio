@@ -66,7 +66,19 @@ npx prisma migrate deploy # or `npx prisma db push` against a scratch database
 npm run dev
 ```
 
-`npm test` needs no database. `npm run build` runs `prisma generate` first.
+`npm test` needs no database. `npm run build` runs `prisma generate` and
+`prisma migrate deploy` first, so a deploy applies pending migrations itself.
+
+### Deploying to Vercel
+
+Set four environment variables on the project: `DATABASE_URL` (Supabase pooled, port 6543),
+`DIRECT_URL` (direct, port 5432), and `ALLOWED_EMAIL`. The Supabase Vercel integration injects
+its own `POSTGRES_*` names — these two are read by `prisma/schema.prisma` and must be set
+explicitly whatever else is present.
+
+**Auth is not wired to Supabase sessions yet.** Until it is, a deployed URL is readable by
+anyone who has it. Keep Vercel's deployment protection on, or keep it local, until real
+figures are in.
 
 ## Things the data cannot tell you yet
 
