@@ -15,6 +15,10 @@ effective-share traversal and the maturity ladder working. Useful the day it shi
   Entity), entity filter, month selector.
 - **Debt** — the maturity ladder, per-loan detail, full amortization schedules, guaranteed
   exposure held separate from the pro-rata share.
+- **Equity** — value against debt per property, LTV, your share, and what a sale would actually
+  pay out: costs, then debt, then capital back to whoever put it in, then the rest split by
+  ownership. Value estimates are dated and carry their source, because an appraisal and a
+  Zestimate are not the same evidence.
 - **Payouts** — what leaves the business each month: interest owed to lenders on the note's
   schedule (monthly, quarterly, semiannual or annual), each owner's share of net cash, and
   capital accounts showing what an investor is still owed back on sale. Lenders are owed

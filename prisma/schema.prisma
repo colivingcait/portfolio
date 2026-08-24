@@ -178,6 +178,7 @@ model Property {
   bankAccounts       BankAccount[]
   loans              Loan[]
   ownershipInterests OwnershipInterest[]
+  valuations         Valuation[]
   capitalEntries     CapitalAccountEntry[]
   summaryLines       SummaryLine[]
   billedLines        BilledLine[]
@@ -372,6 +373,35 @@ model EarningsTableRow {
   property Property?      @relation(fields: [propertyId], references: [id], onDelete: SetNull)
 
   @@index([propertyId, earningsMonth])
+}
+
+/// Where a value estimate came from. A number is only as good as its source,
+/// so the source is stored beside it rather than assumed.
+enum ValuationSource {
+  purchase
+  appraisal
+  broker_opinion
+  avm
+  owner_estimate
+  contract
+  sale
+}
+
+/// A dated value estimate. Dated, like every other record here, so the history
+/// is kept and a property's value can be read as of any month rather than only
+/// as of now.
+model Valuation {
+  id         String          @id @default(cuid())
+  propertyId String
+  date       DateTime        @db.Date
+  valueCents Int
+  source     ValuationSource
+  notes      String?
+  createdAt  DateTime        @default(now())
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId, date])
 }
 
 // ── Banking (§7) ─────────────────────────────────────────────────────────────

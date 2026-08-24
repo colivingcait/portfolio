@@ -13,6 +13,7 @@ import { CATEGORIES } from './engine/categories';
 import type { Field } from './forms';
 
 export type ModelKey =
+  | 'valuation'
   | 'entity'
   | 'property'
   | 'ownershipInterest'
@@ -36,6 +37,44 @@ export interface ModelSpec {
 const opts = (...values: [string, string][]) => values.map(([value, label]) => ({ value, label }));
 
 export const MODELS: Record<ModelKey, ModelSpec> = {
+  valuation: {
+    key: 'valuation',
+    label: 'Valuation',
+    plural: 'Valuations',
+    dynamicOptions: ['propertyId'],
+    fields: [
+      { name: 'propertyId', label: 'Property', type: 'select', required: true, span: 4, options: [] },
+      { name: 'valueCents', label: 'Value', type: 'money', required: true, span: 3, placeholder: '365,000.00' },
+      {
+        name: 'date',
+        label: 'As of',
+        type: 'date',
+        required: true,
+        span: 2,
+        help: 'Estimates are dated, so a value can be read as of any month and an old one is visibly old.',
+      },
+      {
+        name: 'source',
+        label: 'Source',
+        type: 'select',
+        required: true,
+        span: 3,
+        defaultValue: 'owner_estimate',
+        options: opts(
+          ['appraisal', 'Appraisal'],
+          ['broker_opinion', 'Broker opinion (BPO)'],
+          ['contract', 'Under contract at'],
+          ['sale', 'Sold for'],
+          ['purchase', 'Purchase price'],
+          ['avm', 'Automated estimate (Zestimate etc.)'],
+          ['owner_estimate', 'Own estimate'],
+        ),
+        help: 'An appraisal and a Zestimate are not the same evidence, so the source is shown wherever the number is.',
+      },
+      { name: 'notes', label: 'Notes', type: 'textarea', span: 12 },
+    ],
+  },
+
   entity: {
     key: 'entity',
     label: 'Entity',

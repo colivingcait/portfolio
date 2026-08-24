@@ -15,6 +15,7 @@ export interface LoadedOptions {
  * create form and the edit form cannot drift apart.
  */
 const OPTION_SOURCES: Record<ModelKey, Record<string, keyof LoadedOptions>> = {
+  valuation: { propertyId: 'properties' },
   entity: {},
   property: { titleEntityId: 'entities' },
   ownershipInterest: { ownerId: 'entities', propertyId: 'properties', ownedEntityId: 'entities' },

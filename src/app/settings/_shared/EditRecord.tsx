@@ -11,6 +11,7 @@ import { fieldsFor, recordToInitial } from './helpers';
 type Finder = (id: string) => Promise<Record<string, unknown> | null>;
 
 const FINDERS: Record<ModelKey, Finder> = {
+  valuation: (id) => prisma.valuation.findUnique({ where: { id } }),
   entity: (id) => prisma.entity.findUnique({ where: { id } }),
   property: (id) => prisma.property.findUnique({ where: { id } }),
   ownershipInterest: (id) => prisma.ownershipInterest.findUnique({ where: { id } }),

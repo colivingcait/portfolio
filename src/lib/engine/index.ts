@@ -18,3 +18,4 @@ export * from './bank';
 export * from './rollup';
 export * from './assemble';
 export * from './payouts';
+export * from './equity';

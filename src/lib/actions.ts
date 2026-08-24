@@ -26,6 +26,7 @@ type Delegate = {
 };
 
 const DELEGATES: Record<ModelKey, () => Delegate> = {
+  valuation: () => prisma.valuation as unknown as Delegate,
   entity: () => prisma.entity as unknown as Delegate,
   property: () => prisma.property as unknown as Delegate,
   ownershipInterest: () => prisma.ownershipInterest as unknown as Delegate,

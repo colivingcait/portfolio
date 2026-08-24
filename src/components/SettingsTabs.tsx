@@ -10,6 +10,7 @@ const TABS = [
   { href: '/settings/management', label: 'Management' },
   { href: '/settings/accounts', label: 'Accounts' },
   { href: '/settings/loans', label: 'Loans' },
+  { href: '/settings/valuations', label: 'Valuations' },
   { href: '/settings/leases', label: 'Leases' },
   { href: '/settings/rules', label: 'Payee rules' },
   { href: '/settings/capital', label: 'Capital' },
