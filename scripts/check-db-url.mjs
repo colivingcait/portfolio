@@ -66,6 +66,13 @@ function describe(name, raw) {
     problems.push(`${name} carries no password.`);
   }
 
+  // Supavisor authenticates as postgres.<project-ref>, not plain postgres.
+  // Swapping a direct connection string's host for the pooler's while keeping
+  // its username gets you a well-formed URL that fails with P1000.
+  if (url.hostname.includes('pooler.supabase.com') && url.username === 'postgres') {
+    problems.push(`${name} authenticates as "postgres", but the pooler at ${url.hostname} expects "postgres.<project-ref>" — e.g. postgres.abcdefghijklmnop, the ref in your Supabase project URL. This is what P1000 looks like when the password is actually fine.`);
+  }
+
   // The direct host is IPv6-only on new Supabase projects and a Vercel build
   // container generally cannot reach it, so migrate deploy hangs or refuses.
   if (name === 'DIRECT_URL' && /^db\..*\.supabase\.co$/.test(url.hostname)) {

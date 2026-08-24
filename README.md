@@ -82,6 +82,11 @@ transaction pooler on 6543 for `DATABASE_URL`, session pooler on 5432 for `DIREC
 generally cannot reach it, so `prisma migrate deploy` fails there regardless of the URL being
 well-formed.
 
+The pooler authenticates as `postgres.<project-ref>`, not plain `postgres`. Swapping a direct
+connection string's host for the pooler's while keeping its username produces a well-formed
+URL that fails with `P1000: Authentication failed` even when the password is correct — copy
+the pooler string whole rather than editing the direct one.
+
 Paste the connection strings **bare**: no surrounding quotes, no `DATABASE_URL=` prefix.
 Vercel stores the value verbatim, so a copied-in quote makes the scheme `"postgresql` and the
 build fails with `P1013: The provided database string is invalid`. `DIRECT_URL` is the one
