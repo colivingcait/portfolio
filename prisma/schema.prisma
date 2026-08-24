@@ -145,30 +145,37 @@ enum PropertyStatus {
 }
 
 model Property {
-  id            String         @id @default(cuid())
-  name          String
-  addressLine1  String?
-  city          String?
-  state         String?
-  postalCode    String?
+  id                 String         @id @default(cuid())
+  name               String
+  addressLine1       String?
+  city               String?
+  state              String?
+  postalCode         String?
   /// PadSplit PSID. Null for properties that have nothing to do with PadSplit.
-  externalId    String?        @unique
+  externalId         String?        @unique
   /// Which legal owner holds title. Every report is filterable by entity.
-  titleEntityId String
-  revenueSource RevenueSource
-  unitStructure UnitStructure
-  status        PropertyStatus @default(stabilized)
-  roomCount     Int?
-  unitCount     Int?
-  acquiredOn    DateTime?      @db.Date
-  disposedOn    DateTime?      @db.Date
+  titleEntityId      String
+  revenueSource      RevenueSource
+  unitStructure      UnitStructure
+  status             PropertyStatus @default(stabilized)
+  roomCount          Int?
+  unitCount          Int?
+  acquiredOn         DateTime?      @db.Date
+  /// What the property cost. Reference for the accountant, and the starting
+  /// point for basis.
+  purchasePriceCents Int?
+  /// The money that actually left your pocket: deposit, closing costs and
+  /// rehab. This is the denominator of cash-on-cash, and it is NOT the
+  /// purchase price — financing the rest is the whole point.
+  cashInvestedCents  Int?
+  disposedOn         DateTime?      @db.Date
   /// The §1 property table is carried from an earlier build document and is
   /// NOT yet verified. Nothing renders as fact until someone confirms the
   /// address, room count and status and sets this.
-  dataVerified  Boolean        @default(false)
-  notes         String?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  dataVerified       Boolean        @default(false)
+  notes              String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
 
   titleEntity        Entity                  @relation("PropertyTitleEntity", fields: [titleEntityId], references: [id])
   units              Unit[]

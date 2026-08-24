@@ -165,6 +165,21 @@ export const MODELS: Record<ModelKey, ModelSpec> = {
       { name: 'roomCount', label: 'Rooms', type: 'number', span: 1, placeholder: '8' },
       { name: 'unitCount', label: 'Units', type: 'number', span: 2, placeholder: '2' },
       { name: 'acquiredOn', label: 'Acquired', type: 'date', span: 3 },
+      {
+        name: 'purchasePriceCents',
+        label: 'Purchase price',
+        type: 'money',
+        span: 3,
+        placeholder: '300,000.00',
+      },
+      {
+        name: 'cashInvestedCents',
+        label: 'Cash invested',
+        type: 'money',
+        span: 3,
+        placeholder: '85,000.00',
+        help: 'What actually left your pocket — deposit, closing costs and rehab. Not the purchase price: this is the denominator of cash-on-cash and of IRR.',
+      },
       { name: 'disposedOn', label: 'Disposed', type: 'date', span: 3 },
       {
         name: 'dataVerified',

@@ -19,6 +19,13 @@ effective-share traversal and the maturity ladder working. Useful the day it shi
   pay out: costs, then debt, then capital back to whoever put it in, then the rest split by
   ownership. Value estimates are dated and carry their source, because an appraisal and a
   Zestimate are not the same evidence.
+- **Reports** — Schedule E per property for a chosen year, built from the operational categories
+  without changing them: utilities gather from electric/gas/water/trash/internet, mortgage
+  interest comes from the amortization schedules rather than the bank line, furnishings and
+  capex are held out as depreciable rather than deducted, and principal repayment is shown
+  separately as the non-expense it is. Exports as CSV. Alongside it: cap rate, DSCR,
+  cash-on-cash, expense ratio, equity multiple and IRR, each saying when it has been annualised
+  from a part year or ends in an estimated rather than a realised exit.
 - **Payouts** — what leaves the business each month: interest owed to lenders on the note's
   schedule (monthly, quarterly, semiannual or annual), each owner's share of net cash, and
   capital accounts showing what an investor is still owed back on sale. Lenders are owed

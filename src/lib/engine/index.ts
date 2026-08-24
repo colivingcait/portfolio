@@ -19,3 +19,5 @@ export * from './rollup';
 export * from './assemble';
 export * from './payouts';
 export * from './equity';
+export * from './tax';
+export * from './metrics';
