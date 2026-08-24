@@ -1,5 +1,6 @@
 import 'server-only';
 import { prisma } from './db';
+import { getCategoryCatalog } from './categories-queries';
 import { requireIsoDate, toLoanPayment, toLoanTerms, toOwnershipInterest } from './mappers';
 import { buildSchedule } from './engine/amortization';
 import { effectiveShare } from './engine/ownership';
@@ -42,8 +43,9 @@ export async function getYearReport(year: number, entityId?: string | null) {
   const months = monthsOfYear(year);
   const yearEnd = `${year}-12-31`;
 
-  const [properties, accounts, transactions, loans, rollups, valuationRows, interests, entities, capitalRows] =
+  const [catalog, properties, accounts, transactions, loans, rollups, valuationRows, interests, entities, capitalRows] =
     await Promise.all([
+      getCategoryCatalog(),
       prisma.property.findMany({
         where: entityId ? { titleEntityId: entityId } : {},
         include: { titleEntity: true },
@@ -111,6 +113,7 @@ export async function getYearReport(year: number, entityId?: string | null) {
       propertyId: property.id,
       transactions: propertyTransactions,
       mortgageInterestCents: mortgageInterest,
+      catalog,
     });
 
     const propertyRollups = rollups.filter((r) => r.propertyId === property.id);
@@ -190,6 +193,7 @@ export async function getYearReport(year: number, entityId?: string | null) {
 
   return {
     year,
+    catalog,
     rows,
     entities: entities.map((e) => ({ value: e.id, label: e.name })),
     crossesEntities: new Set(rows.map((r) => r.entityId)).size > 1,

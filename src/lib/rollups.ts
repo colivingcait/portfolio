@@ -1,5 +1,6 @@
 import 'server-only';
 import { prisma } from './db';
+import { getCategoryCatalog } from './categories-queries';
 import { toLoanPayment, toLoanTerms, requireIsoDate } from './mappers';
 import { balanceAtDate, debtServiceForMonth } from './engine/amortization';
 import { assemblePropertyRollup, deriveFromBank } from './engine/assemble';
@@ -39,7 +40,8 @@ export async function recomputePropertyMonth(propertyId: string, month: MonthKey
     matchedRuleId: t.matchedRuleId,
   }));
 
-  const bank = deriveFromBank(periodTotals(classified));
+  const catalog = await getCategoryCatalog();
+  const bank = deriveFromBank(periodTotals(classified, catalog), catalog);
   const asOf = monthEnd(month);
 
   const activeLoans = property.loans.filter((loan) => loan.status === 'active');

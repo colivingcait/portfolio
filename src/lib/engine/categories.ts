@@ -81,6 +81,14 @@ export const CATEGORIES: CategoryDef[] = [
   },
   { key: 'transfer_between_own_accounts', taxTreatment: 'not_reportable', label: 'Transfer between own accounts', class: 'not_income', excludeFromPnl: true },
   { key: 'owner_contribution', taxTreatment: 'not_reportable', label: 'Owner contribution', class: 'not_income', excludeFromPnl: true },
+  {
+    key: 'loan_proceeds',
+    taxTreatment: 'not_reportable',
+    label: 'Loan proceeds',
+    class: 'not_income',
+    excludeFromPnl: true,
+    note: 'Money borrowed is not income — it is debt, and it is repaid. What the money then buys is classified on its own merits, and the interest is deductible as it is paid.',
+  },
   { key: 'owner_draw', taxTreatment: 'not_reportable', label: 'Owner draw', class: 'not_income', excludeFromPnl: true },
   {
     key: 'not_portfolio', taxTreatment: 'not_reportable',
@@ -106,6 +114,21 @@ export const CATEGORIES: CategoryDef[] = [
   { key: 'turn_cleaning', taxTreatment: 'deductible', taxLine: 'cleaning_maintenance', label: 'Turn & cleaning', class: 'expense' },
   { key: 'maintenance_repairs', taxTreatment: 'deductible', taxLine: 'repairs', label: 'Maintenance & repairs', class: 'expense' },
   { key: 'lawn', taxTreatment: 'deductible', taxLine: 'cleaning_maintenance', label: 'Lawn', class: 'expense' },
+  {
+    key: 'pest_control',
+    taxTreatment: 'deductible',
+    taxLine: 'cleaning_maintenance',
+    label: 'Pest control',
+    class: 'expense',
+  },
+  {
+    key: 'home_warranty',
+    taxTreatment: 'deductible',
+    taxLine: 'repairs',
+    label: 'Home warranty',
+    class: 'expense',
+    note: 'A service contract covering repairs, so it lands on the repairs line. Some accountants prefer insurance — the mapping is shown in Reports, and can be overridden in Settings if yours disagrees.',
+  },
   { key: 'insurance', taxTreatment: 'deductible', taxLine: 'insurance', label: 'Insurance', class: 'expense' },
   { key: 'property_tax', taxTreatment: 'deductible', taxLine: 'taxes', label: 'Property tax', class: 'expense' },
   { key: 'hoa', taxTreatment: 'deductible', taxLine: 'other', label: 'HOA', class: 'expense' },
@@ -141,39 +164,69 @@ export const CATEGORIES: CategoryDef[] = [
 
 const BY_KEY = new Map(CATEGORIES.map((c) => [c.key, c]));
 
-export function category(key: string): CategoryDef | null {
-  return BY_KEY.get(key) ?? null;
+/**
+ * The categories in play.
+ *
+ * Defaults to the built-ins. Anywhere that can see the database passes a
+ * merged catalog instead, so a category someone added themselves behaves
+ * exactly like one shipped in code — including at year end.
+ */
+export type CategoryCatalog = readonly CategoryDef[];
+
+export function category(key: string, catalog?: CategoryCatalog): CategoryDef | null {
+  if (!catalog) return BY_KEY.get(key) ?? null;
+  return catalog.find((definition) => definition.key === key) ?? null;
 }
 
-export function isIncome(key: string): boolean {
-  return category(key)?.class === 'income';
+export function isIncome(key: string, catalog?: CategoryCatalog): boolean {
+  return category(key, catalog)?.class === 'income';
 }
 
-export function isExpense(key: string): boolean {
-  return category(key)?.class === 'expense';
+export function isExpense(key: string, catalog?: CategoryCatalog): boolean {
+  return category(key, catalog)?.class === 'expense';
 }
 
 /** Excluded from the P&L: deposits held, transfers, owner cash, foreign charges. */
-export function affectsPnl(key: string): boolean {
-  const def = category(key);
+export function affectsPnl(key: string, catalog?: CategoryCatalog): boolean {
+  const def = category(key, catalog);
   return def !== null && !def.excludeFromPnl;
 }
 
-export function isIntercompany(key: string): boolean {
-  return category(key)?.intercompany === true;
+export function isIntercompany(key: string, catalog?: CategoryCatalog): boolean {
+  return category(key, catalog)?.intercompany === true;
 }
 
-export function taxLineFor(key: string): ScheduleELine | null {
-  return category(key)?.taxLine ?? null;
+/**
+ * Built-ins plus anything added later. A custom entry sharing a built-in's key
+ * replaces it, which is how a mapping you disagree with gets corrected.
+ */
+export function mergeCatalog(custom: readonly CategoryDef[]): CategoryDef[] {
+  const merged = new Map(CATEGORIES.map((definition) => [definition.key, definition]));
+  for (const definition of custom) merged.set(definition.key, definition);
+  return [...merged.values()];
 }
 
-export function taxTreatmentFor(key: string): TaxTreatment | null {
-  return category(key)?.taxTreatment ?? null;
+/** A label into a stable key: "Pest Control" becomes "pest_control". */
+export function keyFromLabel(label: string): string {
+  return label
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40);
+}
+
+export function taxLineFor(key: string, catalog?: CategoryCatalog): ScheduleELine | null {
+  return category(key, catalog)?.taxLine ?? null;
+}
+
+export function taxTreatmentFor(key: string, catalog?: CategoryCatalog): TaxTreatment | null {
+  return category(key, catalog)?.taxTreatment ?? null;
 }
 
 /** Spend that is depreciated rather than deducted in the year it happened. */
-export function isCapitalizable(key: string): boolean {
-  return category(key)?.taxTreatment === 'capitalizable';
+export function isCapitalizable(key: string, catalog?: CategoryCatalog): boolean {
+  return category(key, catalog)?.taxTreatment === 'capitalizable';
 }
 
 export const DEPOSIT_LIABILITY_CATEGORIES = [

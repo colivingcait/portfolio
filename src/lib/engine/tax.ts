@@ -7,7 +7,7 @@
  * year, where an accountant can check it.
  */
 
-import { CATEGORIES, category, type ScheduleELine } from './categories';
+import { CATEGORIES, category, type CategoryCatalog, type ScheduleELine } from './categories';
 import type { MonthKey } from './dates';
 import { sumCents, type Cents } from './money';
 
@@ -80,6 +80,8 @@ export interface ScheduleEInput {
   mortgageInterestCents: Cents;
   /** Interest on notes that are not mortgages, where you separate them. */
   otherInterestCents?: Cents;
+  /** Built-ins plus anything added later. */
+  catalog?: CategoryCatalog;
 }
 
 export function buildScheduleE(input: ScheduleEInput): ScheduleEReport {
@@ -100,7 +102,7 @@ export function buildScheduleE(input: ScheduleEInput): ScheduleEReport {
       continue;
     }
 
-    const definition = category(transaction.categoryKey);
+    const definition = category(transaction.categoryKey, input.catalog);
     if (!definition) {
       uncategorized += transaction.amountCents;
       uncategorizedCount += 1;
@@ -152,7 +154,7 @@ export function buildScheduleE(input: ScheduleEInput): ScheduleEReport {
           label:
             categoryKey === '__schedule__'
               ? 'From the amortization schedule'
-              : (category(categoryKey)?.label ?? categoryKey),
+              : (category(categoryKey, input.catalog)?.label ?? categoryKey),
           amountCents,
         }))
       : [];
@@ -189,7 +191,7 @@ export function buildScheduleE(input: ScheduleEInput): ScheduleEReport {
     netIncomeCents: grossRents - totalExpenses,
     capitalizable: [...capitalizable.entries()].map(([categoryKey, value]) => ({
       categoryKey,
-      label: category(categoryKey)?.label ?? categoryKey,
+      label: category(categoryKey, input.catalog)?.label ?? categoryKey,
       amountCents: value.amountCents,
       items: value.items,
     })),
@@ -202,8 +204,10 @@ export function buildScheduleE(input: ScheduleEInput): ScheduleEReport {
 }
 
 /** Every operational category and the line it feeds, for the mapping page. */
-export function mappingTable(): { categoryKey: string; label: string; treatment: string; line: string }[] {
-  return CATEGORIES.map((definition) => ({
+export function mappingTable(
+  catalog: CategoryCatalog = CATEGORIES,
+): { categoryKey: string; label: string; treatment: string; line: string }[] {
+  return catalog.map((definition) => ({
     categoryKey: definition.key,
     label: definition.label,
     treatment: definition.taxTreatment,

@@ -314,7 +314,7 @@ export default async function ReportsPage({
               </tr>
             </thead>
             <tbody>
-              {mappingTable().map((row) => (
+              {mappingTable(data.catalog).map((row) => (
                 <tr key={row.categoryKey}>
                   <Td>{row.label}</Td>
                   <Td>

@@ -8,7 +8,7 @@
 
 import type { MonthKey } from './dates';
 import type { PeriodTotals } from './bank';
-import { isExpense, isIncome } from './categories';
+import { isExpense, isIncome, type CategoryCatalog } from './categories';
 import type { Cents } from './money';
 import type { PropertyRollup } from './rollup';
 
@@ -45,7 +45,7 @@ export interface BankDerived {
  * authoritative for it: the bank shows one number, the schedule explains it
  * as principal and interest (§8).
  */
-export function deriveFromBank(totals: PeriodTotals): BankDerived {
+export function deriveFromBank(totals: PeriodTotals, catalog?: CategoryCatalog): BankDerived {
   let revenue = 0;
   let deposits = 0;
   let opex = 0;
@@ -54,13 +54,13 @@ export function deriveFromBank(totals: PeriodTotals): BankDerived {
   for (const [categoryKey, amountCents] of Object.entries(totals.byCategory)) {
     if (categoryKey === 'uncategorized') continue;
 
-    if (isIncome(categoryKey)) {
+    if (isIncome(categoryKey, catalog)) {
       if (REMITTANCE_SET.has(categoryKey)) deposits += amountCents;
       else revenue += amountCents;
       continue;
     }
 
-    if (isExpense(categoryKey)) {
+    if (isExpense(categoryKey, catalog)) {
       // Expenses arrive as negative amounts; opex is carried positive.
       if (categoryKey === 'debt_service') categorizedDebtService += -amountCents;
       else opex += -amountCents;

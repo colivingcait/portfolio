@@ -7,7 +7,7 @@
  */
 
 import type { IsoDate } from './dates';
-import { affectsPnl, category, isExpense, isIncome } from './categories';
+import { affectsPnl, category, isExpense, isIncome, type CategoryCatalog } from './categories';
 import { sumCents, type Cents } from './money';
 
 export interface RawTransaction {
@@ -144,7 +144,10 @@ export interface PeriodTotals {
   byCategory: Record<string, Cents>;
 }
 
-export function periodTotals(transactions: readonly ClassifiedTransaction[]): PeriodTotals {
+export function periodTotals(
+  transactions: readonly ClassifiedTransaction[],
+  catalog?: CategoryCatalog,
+): PeriodTotals {
   const byCategory: Record<string, Cents> = {};
   let income = 0;
   let expense = 0;
@@ -159,12 +162,12 @@ export function periodTotals(transactions: readonly ClassifiedTransaction[]): Pe
     if (t.categoryKey === 'security_deposit_received') depositsDelta += t.amountCents;
     if (t.categoryKey === 'security_deposit_returned') depositsDelta += t.amountCents; // negative amount
 
-    if (!affectsPnl(t.categoryKey)) {
+    if (!affectsPnl(t.categoryKey, catalog)) {
       excluded += t.amountCents;
       continue;
     }
-    if (isIncome(t.categoryKey)) income += t.amountCents;
-    else if (isExpense(t.categoryKey)) expense += -t.amountCents; // debits are negative
+    if (isIncome(t.categoryKey, catalog)) income += t.amountCents;
+    else if (isExpense(t.categoryKey, catalog)) expense += -t.amountCents; // debits are negative
   }
 
   return {
@@ -181,12 +184,11 @@ export function periodTotals(transactions: readonly ClassifiedTransaction[]): Pe
  * A rule learned from a confirmed review row. Applies to every future import
  * on that account — that is the whole difference from the Stessa experience.
  */
-export function ruleFromConfirmation(input: {
-  description: string;
-  categoryKey: string;
-  bankAccountId: string | null;
-}): Omit<PayeeRule, 'id'> {
-  if (!category(input.categoryKey)) {
+export function ruleFromConfirmation(
+  input: { description: string; categoryKey: string; bankAccountId: string | null },
+  catalog?: CategoryCatalog,
+): Omit<PayeeRule, 'id'> {
+  if (!category(input.categoryKey, catalog)) {
     throw new Error(`Unknown category: ${input.categoryKey}`);
   }
   return {

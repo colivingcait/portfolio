@@ -526,6 +526,8 @@ export const MODELS: Record<ModelKey, ModelSpec> = {
         type: 'select',
         required: true,
         span: 3,
+        // Filled from the merged catalog at render time, so a category added
+        // in Settings is immediately pickable here too.
         options: CATEGORIES.map((c) => ({ value: c.key, label: c.label })),
       },
       {

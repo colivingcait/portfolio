@@ -5,17 +5,22 @@ import { RecordForm } from '@/components/RecordForm';
 import { DeleteButton } from '@/components/DeleteButton';
 import { Empty, PageHeader, Panel, Td, Th } from '@/components/ui';
 import { withOptions } from '../_shared/helpers';
+import { getCategoryCatalog } from '@/lib/categories-queries';
 import { category } from '@/lib/engine/categories';
 
 export const dynamic = 'force-dynamic';
 
 export default async function RulesPage() {
-  const [rules, options] = await Promise.all([
+  const [rules, options, catalog] = await Promise.all([
     prisma.payeeRule.findMany({ include: { bankAccount: { include: { property: true } } }, orderBy: [{ priority: 'desc' }, { match: 'asc' }] }),
     getSelectOptions(),
+    getCategoryCatalog(),
   ]);
 
-  const fields = withOptions('payeeRule', { bankAccountId: options.accounts });
+  const fields = withOptions('payeeRule', {
+    bankAccountId: options.accounts,
+    categoryKey: catalog.map((c) => ({ value: c.key, label: c.label })),
+  });
 
   return (
     <>
@@ -53,7 +58,7 @@ export default async function RulesPage() {
                   <Td>
                     <code className="text-[12px]">{rule.match}</code>
                   </Td>
-                  <Td>{category(rule.categoryKey)?.label ?? rule.categoryKey}</Td>
+                  <Td>{category(rule.categoryKey, catalog)?.label ?? rule.categoryKey}</Td>
                   <Td right>{rule.priority}</Td>
                   <Td>
                     <div className="flex items-center gap-3">

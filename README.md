@@ -19,6 +19,12 @@ effective-share traversal and the maturity ladder working. Useful the day it shi
   pay out: costs, then debt, then capital back to whoever put it in, then the rest split by
   ownership. Value estimates are dated and carry their source, because an appraisal and a
   Zestimate are not the same evidence.
+Categories are editable in Settings: name one the way you think about it, choose once where it
+lands at year end, and it behaves identically to a built-in everywhere afterwards. A custom
+entry sharing a built-in's name replaces it, which is how a tax mapping you disagree with gets
+corrected. Hiding one keeps it off the pickers without touching transactions already filed
+under it.
+
 - **Reports** — Schedule E per property for a chosen year, built from the operational categories
   without changing them: utilities gather from electric/gas/water/trash/internet, mortgage
   interest comes from the amortization schedules rather than the bank line, furnishings and

@@ -3,6 +3,7 @@ import { centsToInput } from '@/lib/forms';
 import { MODELS, type ModelKey } from '@/lib/models';
 
 export interface LoadedOptions {
+  categories?: SelectOption[];
   entities: SelectOption[];
   properties: SelectOption[];
   accounts: SelectOption[];
@@ -24,7 +25,7 @@ const OPTION_SOURCES: Record<ModelKey, Record<string, keyof LoadedOptions>> = {
   loan: { propertyId: 'properties' },
   loanPayment: { loanId: 'loans' },
   lease: { propertyId: 'properties', unitId: 'units' },
-  payeeRule: { bankAccountId: 'accounts' },
+  payeeRule: { bankAccountId: 'accounts', categoryKey: 'categories' },
   capitalAccountEntry: { entityId: 'entities', propertyId: 'properties' },
 };
 
@@ -32,7 +33,10 @@ export function fieldsFor(modelKey: ModelKey, options: LoadedOptions): Field[] {
   const sources = OPTION_SOURCES[modelKey];
   return MODELS[modelKey].fields.map((field) => {
     const source = sources[field.name];
-    return source ? { ...field, options: options[source] } : field;
+    const supplied = source ? options[source] : undefined;
+    // A field with no loaded options keeps whatever it declared, so the
+    // built-in category list still works before anything custom exists.
+    return supplied ? { ...field, options: supplied } : field;
   });
 }
 

@@ -3,10 +3,10 @@
 import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { confirmTransaction, suggestRule, type RuleSuggestion } from '@/lib/import-actions';
-import { CATEGORIES } from '@/lib/engine/categories';
 import { formatCents } from '@/lib/engine/money';
 
 interface Props {
+  categories: { key: string; label: string }[];
   id: string;
   date: string;
   propertyName: string;
@@ -15,7 +15,7 @@ interface Props {
   suggestion: string;
 }
 
-export function ReviewRow({ id, date, propertyName, description, amountCents, suggestion }: Props) {
+export function ReviewRow({ categories, id, date, propertyName, description, amountCents, suggestion }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [categoryKey, setCategoryKey] = useState(suggestion);
@@ -98,7 +98,7 @@ export function ReviewRow({ id, date, propertyName, description, amountCents, su
       </td>
       <td className="border-b border-line/60 px-2 py-2">
         <select value={categoryKey} onChange={(e) => setCategoryKey(e.target.value)} className="text-[12px]">
-          {CATEGORIES.map((c) => (
+          {categories.map((c) => (
             <option key={c.key} value={c.key}>
               {c.label}
             </option>

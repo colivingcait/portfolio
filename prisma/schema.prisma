@@ -382,6 +382,29 @@ model EarningsTableRow {
   @@index([propertyId, earningsMonth])
 }
 
+/// A category someone added themselves — pest control, pool service, whatever
+/// this portfolio turns out to need. Built-in categories live in code; these
+/// sit alongside them and behave identically, including at year end, which is
+/// why a tax treatment is required rather than optional.
+model CustomCategory {
+  id           String   @id @default(cuid())
+  /// Stable identifier stored on transactions. Derived from the label once and
+  /// then never changed, so renaming a category cannot orphan its history.
+  key          String   @unique
+  label        String
+  /// income | not_income | expense
+  class        String
+  /// Schedule E line, for the year-end report.
+  taxLine      String?
+  /// income | deductible | capitalizable | not_reportable
+  taxTreatment String
+  note         String?
+  /// Kept out of the pickers without breaking transactions already using it.
+  archived     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
 /// Where a value estimate came from. A number is only as good as its source,
 /// so the source is stored beside it rather than assumed.
 enum ValuationSource {

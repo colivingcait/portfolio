@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildScheduleE, mappingTable, type TaxTransaction } from '../tax';
-import { isCapitalizable, taxLineFor, taxTreatmentFor } from '../categories';
+import { isCapitalizable, keyFromLabel, mergeCatalog, taxLineFor, taxTreatmentFor } from '../categories';
 import { cents } from '../money';
 
 function tx(categoryKey: string | null, amount: number, date = '2026-03-15'): TaxTransaction {
@@ -114,5 +114,59 @@ describe('building a year', () => {
     });
     expect(withGaps.uncategorizedCount).toBe(1);
     expect(withGaps.warnings.some((w) => /uncategorized/.test(w))).toBe(true);
+  });
+});
+
+describe('categories added later', () => {
+  it('turns a label into a stable key', () => {
+    expect(keyFromLabel('Pest control')).toBe('pest_control');
+    expect(keyFromLabel('Turn & Cleaning')).toBe('turn_and_cleaning');
+    expect(keyFromLabel('  Pool / Spa  ')).toBe('pool_spa');
+  });
+
+  it('behaves exactly like a built-in at year end', () => {
+    const catalog = mergeCatalog([
+      { key: 'pool_service', label: 'Pool service', class: 'expense', taxTreatment: 'deductible', taxLine: 'cleaning_maintenance' },
+    ]);
+    const report = buildScheduleE({
+      year: 2026,
+      propertyId: 'p1',
+      transactions: [tx('pool_service', -220, '2026-05-01'), tx('lawn', -95, '2026-05-02')],
+      mortgageInterestCents: 0,
+      catalog,
+    });
+    // Both land on the same line, from the same code path.
+    expect(report.lines.find((l) => l.line === 'cleaning_maintenance')!.amountCents).toBe(cents(315));
+  });
+
+  it('lets a custom entry replace a built-in it shares a key with', () => {
+    const catalog = mergeCatalog([
+      { key: 'home_warranty', label: 'Home warranty', class: 'expense', taxTreatment: 'deductible', taxLine: 'insurance' },
+    ]);
+    const report = buildScheduleE({
+      year: 2026,
+      propertyId: 'p1',
+      transactions: [tx('home_warranty', -680, '2026-07-12')],
+      mortgageInterestCents: 0,
+      catalog,
+    });
+    // Built in it goes to repairs; overridden here it goes to insurance.
+    expect(report.lines.find((l) => l.line === 'insurance')!.amountCents).toBe(cents(680));
+    expect(report.lines.find((l) => l.line === 'repairs')!.amountCents).toBe(0);
+  });
+
+  it('keeps borrowed money out of income', () => {
+    // A loan funding a repair is not revenue; the repair is classified on its
+    // own merits and the interest is deductible as it is paid.
+    const report = buildScheduleE({
+      year: 2026,
+      propertyId: 'p1',
+      transactions: [tx('loan_proceeds', 18_000, '2026-04-01'), tx('capex', -18_000, '2026-04-08')],
+      mortgageInterestCents: 0,
+    });
+    expect(report.grossRentsCents).toBe(0);
+    expect(report.excludedCents).toBe(cents(18_000));
+    expect(report.capitalizableTotalCents).toBe(cents(18_000));
+    expect(report.totalExpensesCents).toBe(0);
   });
 });

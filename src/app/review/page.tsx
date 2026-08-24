@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/db';
+import { getCategoryOptions } from '@/lib/categories-queries';
 import { Empty, Note, PageHeader, Panel, Th } from '@/components/ui';
 import { ReviewRow } from '@/components/ReviewRow';
 
@@ -15,12 +16,15 @@ function suggestionFor(amountCents: number): string {
 }
 
 export default async function ReviewPage() {
-  const unmatched = await prisma.bankTransaction.findMany({
+  const [categories, unmatched] = await Promise.all([
+    getCategoryOptions(),
+    prisma.bankTransaction.findMany({
     where: { categoryKey: null },
     include: { statement: { include: { bankAccount: { include: { property: true } } } } },
-    orderBy: [{ date: 'desc' }],
-    take: 200,
-  });
+      orderBy: [{ date: 'desc' }],
+      take: 200,
+    }),
+  ]);
 
   return (
     <>
@@ -62,6 +66,7 @@ export default async function ReviewPage() {
                 {unmatched.map((transaction) => (
                   <ReviewRow
                     key={transaction.id}
+                    categories={categories}
                     id={transaction.id}
                     date={transaction.date.toISOString().slice(0, 10)}
                     propertyName={transaction.statement.bankAccount.property.name}
