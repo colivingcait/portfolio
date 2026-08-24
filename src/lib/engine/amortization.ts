@@ -16,6 +16,24 @@ export type LoanStructure =
   | 'interest_only_balloon'
   | 'custom';
 
+export type PaymentFrequency = 'monthly' | 'quarterly' | 'semiannual' | 'annual';
+
+const PERIODS_PER_YEAR: Record<PaymentFrequency, number> = {
+  monthly: 12,
+  quarterly: 4,
+  semiannual: 2,
+  annual: 1,
+};
+
+export function periodsPerYear(frequency: PaymentFrequency = 'monthly'): number {
+  return PERIODS_PER_YEAR[frequency];
+}
+
+/** Months between one payment and the next. */
+export function monthsPerPeriod(frequency: PaymentFrequency = 'monthly'): number {
+  return 12 / PERIODS_PER_YEAR[frequency];
+}
+
 export interface LoanTerms {
   originalPrincipalCents: Cents;
   /** Whole-number annual rate: 7.25 means 7.25%. */
@@ -28,6 +46,8 @@ export interface LoanTerms {
   /** Required for 'custom'; derived for 'fully_amortizing' when absent. */
   paymentAmountCents?: Cents | null;
   structure: LoanStructure;
+  /** Monthly unless stated. A private note is often quarterly. */
+  paymentFrequency?: PaymentFrequency;
   /** Defaults to the balance outstanding at maturity. */
   balloonAmountCents?: Cents | null;
   escrowIncluded?: boolean;
@@ -81,38 +101,65 @@ export function maturityDateOf(terms: LoanTerms): IsoDate {
   return addMonths(terms.firstPaymentDate, termMonthsOf(terms) - 1);
 }
 
+/** How many payments the term contains at this frequency. */
+export function paymentCountOf(terms: LoanTerms): number {
+  const step = monthsPerPeriod(terms.paymentFrequency);
+  return Math.max(1, Math.round(termMonthsOf(terms) / step));
+}
+
 export function daysToMaturity(terms: LoanTerms, asOf: IsoDate): number {
   return daysBetween(asOf, maturityDateOf(terms));
 }
 
-/** Standard amortizing payment. Zero-rate loans divide principal evenly. */
+/**
+ * Standard amortizing payment. Zero-rate loans divide principal evenly.
+ * `periods` is the number of PAYMENTS, not months, and the rate is divided by
+ * how many of them fall in a year.
+ */
+export function paymentPerPeriod(
+  principalCents: Cents,
+  annualRatePercent: number,
+  periods: number,
+  perYear = 12,
+): Cents {
+  if (periods <= 0) return principalCents;
+  const r = annualRatePercent / 100 / perYear;
+  if (r === 0) return roundCents(principalCents / periods);
+  const factor = Math.pow(1 + r, periods);
+  return roundCents((principalCents * r * factor) / (factor - 1));
+}
+
+/** Monthly case, kept for callers that mean months. */
 export function monthlyPayment(
   principalCents: Cents,
   annualRatePercent: number,
   termMonths: number,
 ): Cents {
-  if (termMonths <= 0) return principalCents;
-  const r = annualRatePercent / 100 / 12;
-  if (r === 0) return roundCents(principalCents / termMonths);
-  const factor = Math.pow(1 + r, termMonths);
-  return roundCents((principalCents * r * factor) / (factor - 1));
+  return paymentPerPeriod(principalCents, annualRatePercent, termMonths, 12);
 }
 
 function scheduledPaymentFor(terms: LoanTerms): Cents {
   if (terms.paymentAmountCents && terms.paymentAmountCents > 0) return terms.paymentAmountCents;
+  const perYear = periodsPerYear(terms.paymentFrequency);
   switch (terms.structure) {
     case 'fully_amortizing':
-      return monthlyPayment(terms.originalPrincipalCents, terms.annualRatePercent, termMonthsOf(terms));
+      return paymentPerPeriod(
+        terms.originalPrincipalCents,
+        terms.annualRatePercent,
+        paymentCountOf(terms),
+        perYear,
+      );
     case 'interest_only':
     case 'interest_only_balloon':
-      return roundCents((terms.originalPrincipalCents * terms.annualRatePercent) / 100 / 12);
+      return periodInterest(terms.originalPrincipalCents, terms.annualRatePercent, perYear);
     case 'custom':
       throw new Error('A custom-structure loan needs an explicit payment amount');
   }
 }
 
-function monthlyInterest(balanceCents: Cents, annualRatePercent: number): Cents {
-  return roundCents((balanceCents * annualRatePercent) / 100 / 12);
+/** Interest for one payment period at this frequency. */
+export function periodInterest(balanceCents: Cents, annualRatePercent: number, perYear = 12): Cents {
+  return roundCents((balanceCents * annualRatePercent) / 100 / perYear);
 }
 
 /**
@@ -126,7 +173,9 @@ export function buildSchedule(
   terms: LoanTerms,
   payments: readonly LoanPaymentRecord[] = [],
 ): ScheduleRow[] {
-  const term = termMonthsOf(terms);
+  const periods = paymentCountOf(terms);
+  const step = monthsPerPeriod(terms.paymentFrequency);
+  const perYear = periodsPerYear(terms.paymentFrequency);
   const scheduledPayment = scheduledPaymentFor(terms);
   const escrow = terms.escrowIncluded ? (terms.escrowCents ?? 0) : 0;
   const actualByMonth = new Map<MonthKey, LoanPaymentRecord>();
@@ -137,11 +186,11 @@ export function buildSchedule(
   const rows: ScheduleRow[] = [];
   let balance = terms.originalPrincipalCents;
 
-  for (let period = 1; period <= Math.min(term, MAX_PERIODS) && balance > 0; period++) {
-    const dueDate = addMonths(terms.firstPaymentDate, period - 1);
+  for (let period = 1; period <= Math.min(periods, MAX_PERIODS) && balance > 0; period++) {
+    const dueDate = addMonths(terms.firstPaymentDate, (period - 1) * step);
     const month = monthOf(dueDate);
     const actual = actualByMonth.get(month);
-    const isFinal = period === term;
+    const isFinal = period === periods;
     const opening = balance;
 
     let interest: Cents;
@@ -157,7 +206,7 @@ export function buildSchedule(
       escrowPaid = actual.escrowCents;
       payment = actual.totalCents - escrowPaid;
     } else {
-      interest = monthlyInterest(opening, terms.annualRatePercent);
+      interest = periodInterest(opening, terms.annualRatePercent, perYear);
       escrowPaid = escrow;
       extra = 0;
 

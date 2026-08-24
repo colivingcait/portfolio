@@ -15,6 +15,12 @@ effective-share traversal and the maturity ladder working. Useful the day it shi
   Entity), entity filter, month selector.
 - **Debt** — the maturity ladder, per-loan detail, full amortization schedules, guaranteed
   exposure held separate from the pro-rata share.
+- **Payouts** — what leaves the business each month: interest owed to lenders on the note's
+  schedule (monthly, quarterly, semiannual or annual), each owner's share of net cash, and
+  capital accounts showing what an investor is still owed back on sale. Lenders are owed
+  whether or not the property earned; owners are owed a share of profit and nothing when there
+  is none. A profit distribution never reduces the capital owed back — only a return of
+  capital does.
 - **Property detail** — ownership paths, management history with boundary warnings, loans,
   leases.
 - **Settings** — every step-1 record type, plus payee rules, capital accounts and the

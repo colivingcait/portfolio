@@ -89,8 +89,13 @@ model OwnershipInterest {
 }
 
 enum CapitalEntryKind {
+  /// Money the owner put in. Owed back on sale, and not a loan: it accrues no
+  /// interest and appears in no maturity ladder.
   contribution
+  /// A share of profit paid out. Does not reduce what is owed back.
   distribution
+  /// Capital handed back. This is what reduces the outstanding balance.
+  return_of_capital
 }
 
 /// Who funded, as opposed to who owns. Where contributions have been uneven —
@@ -102,6 +107,10 @@ model CapitalAccountEntry {
   propertyId  String?
   kind        CapitalEntryKind
   date        DateTime         @db.Date
+  /// The earnings month a profit distribution relates to, as YYYY-MM. A
+  /// distribution paid in October for September is recorded against September,
+  /// so a month's split can be checked against that month's net cash.
+  month       String?
   amountCents Int
   memo        String?
   createdAt   DateTime         @default(now())
@@ -473,33 +482,42 @@ enum LoanStatus {
   refinanced
 }
 
+/// How often a payment falls due. Private notes are frequently quarterly.
+enum PaymentFrequency {
+  monthly
+  quarterly
+  semiannual
+  annual
+}
+
 model Loan {
-  id                     String        @id @default(cuid())
+  id                     String           @id @default(cuid())
   propertyId             String
   lender                 String
   type                   LoanType
   lienPosition           Int?
   originalPrincipalCents Int
   /// Whole-number annual rate: 7.25 means 7.25%.
-  ratePercent            Decimal       @db.Decimal(7, 4)
-  startDate              DateTime      @db.Date
-  firstPaymentDate       DateTime      @db.Date
+  ratePercent            Decimal          @db.Decimal(7, 4)
+  startDate              DateTime         @db.Date
+  firstPaymentDate       DateTime         @db.Date
   termMonths             Int?
-  maturityDate           DateTime?     @db.Date
+  maturityDate           DateTime?        @db.Date
   paymentAmountCents     Int?
+  paymentFrequency       PaymentFrequency @default(monthly)
   structure              LoanStructure
   balloonAmountCents     Int?
   paymentDayOfMonth      Int?
-  escrowIncluded         Boolean       @default(false)
+  escrowIncluded         Boolean          @default(false)
   escrowCents            Int?
   /// A pro-rata debt share is an economic figure, not a legal one. Where this
   /// is set, the maturity ladder shows the WHOLE balance as exposure
   /// alongside the pro-rata share (§3, the debt caveat).
-  personallyGuaranteed   Boolean       @default(false)
-  status                 LoanStatus    @default(active)
+  personallyGuaranteed   Boolean          @default(false)
+  status                 LoanStatus       @default(active)
   notes                  String?
-  createdAt              DateTime      @default(now())
-  updatedAt              DateTime      @updatedAt
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
 
   property Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   payments LoanPayment[]

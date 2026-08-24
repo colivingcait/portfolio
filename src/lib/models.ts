@@ -328,6 +328,21 @@ export const MODELS: Record<ModelKey, ModelSpec> = {
         ),
       },
       {
+        name: 'paymentFrequency',
+        label: 'Paid',
+        type: 'select',
+        required: true,
+        span: 2,
+        options: opts(
+          ['monthly', 'Monthly'],
+          ['quarterly', 'Quarterly'],
+          ['semiannual', 'Every 6 months'],
+          ['annual', 'Annually'],
+        ),
+        defaultValue: 'monthly',
+        help: 'Private notes are often quarterly. This decides which months the payment shows up in Payouts.',
+      },
+      {
         name: 'paymentAmountCents',
         label: 'Payment',
         type: 'money',

@@ -50,6 +50,7 @@ export interface LoanRow {
   maturityDate: Date | null;
   paymentAmountCents: number | null;
   structure: string;
+  paymentFrequency?: string;
   balloonAmountCents: number | null;
   escrowIncluded: boolean;
   escrowCents: number | null;
@@ -65,6 +66,7 @@ export function toLoanTerms(loan: LoanRow): LoanTerms {
     maturityDate: toIsoDate(loan.maturityDate),
     paymentAmountCents: loan.paymentAmountCents,
     structure: loan.structure as LoanTerms['structure'],
+    paymentFrequency: (loan.paymentFrequency as LoanTerms['paymentFrequency']) ?? 'monthly',
     balloonAmountCents: loan.balloonAmountCents,
     escrowIncluded: loan.escrowIncluded,
     escrowCents: loan.escrowCents,
