@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { saveOwnershipSplit, type SplitRow } from '@/lib/ownership-actions';
+import { createEntityInline, saveOwnershipSplit, type SplitRow } from '@/lib/ownership-actions';
 import type { SelectOption } from '@/lib/forms';
 
 interface Props {
@@ -26,15 +26,24 @@ const blankRow = (startDate: string): DraftRow => ({
   endDate: '',
 });
 
+/** Sentinel option: picking it opens the inline creator rather than selecting. */
+const NEW_ENTITY = '__new__';
+
 export function OwnershipSplitForm({ entities, properties }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [entityOptions, setEntityOptions] = useState<SelectOption[]>(entities);
+  /** Which row is currently creating an entity, and for which select. */
+  const [creatingFor, setCreatingFor] = useState<{ row: number | 'owned' } | null>(null);
+  const [draftName, setDraftName] = useState('');
+  const [draftKind, setDraftKind] = useState<'person' | 'company'>('person');
+  const [draftError, setDraftError] = useState<string | null>(null);
   const [ownedType, setOwnedType] = useState<'property' | 'entity'>('property');
   const [ownedId, setOwnedId] = useState('');
   const [rows, setRows] = useState<DraftRow[]>([blankRow(''), blankRow('')]);
   const [result, setResult] = useState<{ tone: 'good' | 'bad' | 'warn'; text: string; rowIndex?: number } | null>(null);
 
-  const owned = ownedType === 'property' ? properties : entities;
+  const owned = ownedType === 'property' ? properties : entityOptions;
 
   // Everything in one thing should come to 100%. Showing the running total as
   // it is typed is the difference between catching a 5% gap now and finding it
@@ -51,6 +60,41 @@ export function OwnershipSplitForm({ entities, properties }: Props) {
     setRows((current) =>
       current.map((row, i) => (i === 0 || row.startDate === current[0].startDate ? { ...row, startDate } : row)),
     );
+  }
+
+  function openCreator(target: number | 'owned') {
+    setDraftName('');
+    setDraftKind('person');
+    setDraftError(null);
+    setCreatingFor({ row: target });
+  }
+
+  function createEntity() {
+    setDraftError(null);
+    startTransition(async () => {
+      const response = await createEntityInline({ name: draftName, kind: draftKind });
+      if (!response.ok || !response.id) {
+        setDraftError(response.error ?? 'Could not create');
+        return;
+      }
+      const option = { value: response.id, label: response.label ?? draftName };
+      setEntityOptions((current) =>
+        current.some((o) => o.value === option.value)
+          ? current
+          : [...current, option].sort((a, b) => a.label.localeCompare(b.label)),
+      );
+
+      // Select it where it was asked for, so the row is finished, not restarted.
+      const target = creatingFor?.row;
+      if (target === 'owned') setOwnedId(option.value);
+      else if (typeof target === 'number') update(target, { ownerId: option.value });
+
+      setCreatingFor(null);
+      if (response.reused) {
+        setResult({ tone: 'warn', text: `“${option.label}” already existed, so that one was selected rather than a second copy created.` });
+      }
+      router.refresh();
+    });
   }
 
   function save() {
@@ -101,13 +145,17 @@ export function OwnershipSplitForm({ entities, properties }: Props) {
           <label className="mb-1 block text-[11px] uppercase tracking-wide text-muted">
             {ownedType === 'property' ? 'Property' : 'Entity'}
           </label>
-          <select value={ownedId} onChange={(e) => setOwnedId(e.target.value)}>
+          <select
+            value={ownedId}
+            onChange={(e) => (e.target.value === NEW_ENTITY ? openCreator('owned') : setOwnedId(e.target.value))}
+          >
             <option value="">Pick one…</option>
             {owned.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
+            {ownedType === 'entity' ? <option value={NEW_ENTITY}>+ New entity…</option> : null}
           </select>
         </div>
         <div className="col-span-12 sm:col-span-4 flex items-end">
@@ -117,6 +165,55 @@ export function OwnershipSplitForm({ entities, properties }: Props) {
           </p>
         </div>
       </div>
+
+      {creatingFor ? (
+        <div className="rounded-md border border-accent/40 bg-accent/5 px-3 py-3">
+          <div className="grid grid-cols-12 items-end gap-3">
+            <div className="col-span-12 sm:col-span-5">
+              <label className="mb-1 block text-[11px] uppercase tracking-wide text-muted">New entity name</label>
+              <input
+                autoFocus
+                value={draftName}
+                onChange={(e) => setDraftName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); createEntity(); }
+                  if (e.key === 'Escape') setCreatingFor(null);
+                }}
+                placeholder="Partner’s name, or the LLC"
+              />
+            </div>
+            <div className="col-span-6 sm:col-span-3">
+              <label className="mb-1 block text-[11px] uppercase tracking-wide text-muted">Kind</label>
+              <select value={draftKind} onChange={(e) => setDraftKind(e.target.value as 'person' | 'company')}>
+                <option value="person">Person</option>
+                <option value="company">Company</option>
+              </select>
+            </div>
+            <div className="col-span-6 sm:col-span-4 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={createEntity}
+                disabled={pending || draftName.trim() === ''}
+                className="rounded-md border border-line bg-surface px-3 py-1.5 text-[13px] hover:border-accent disabled:opacity-40"
+              >
+                {pending ? 'Creating…' : 'Create & select'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setCreatingFor(null)}
+                className="text-[12px] text-muted hover:text-text"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+          {draftError ? <p className="mt-2 text-[12px] text-bad">{draftError}</p> : null}
+          <p className="mt-2 text-[11px] text-muted">
+            Added to the entity list and selected here. Anything else it needs — tax ID, notes, or marking it as you —
+            can be filled in later under Settings → Entities.
+          </p>
+        </div>
+      ) : null}
 
       <table>
         <thead>
@@ -133,13 +230,19 @@ export function OwnershipSplitForm({ entities, properties }: Props) {
           {rows.map((row, index) => (
             <tr key={index} className={result?.rowIndex === index ? 'bg-bad/5' : undefined}>
               <td className="border-b border-line/60 px-2 py-1.5">
-                <select value={row.ownerId} onChange={(e) => update(index, { ownerId: e.target.value })}>
+                <select
+                  value={row.ownerId}
+                  onChange={(e) =>
+                    e.target.value === NEW_ENTITY ? openCreator(index) : update(index, { ownerId: e.target.value })
+                  }
+                >
                   <option value="">—</option>
-                  {entities.map((option) => (
+                  {entityOptions.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
                     </option>
                   ))}
+                  <option value={NEW_ENTITY}>+ New entity…</option>
                 </select>
               </td>
               <td className="border-b border-line/60 px-2 py-1.5">

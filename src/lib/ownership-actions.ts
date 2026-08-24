@@ -122,3 +122,46 @@ export async function saveOwnershipSplit(input: SplitInput): Promise<SplitResult
       : undefined,
   };
 }
+
+export interface QuickEntityResult {
+  ok: boolean;
+  error?: string;
+  id?: string;
+  label?: string;
+  /** True where an entity of that name already existed and was reused. */
+  reused?: boolean;
+}
+
+/**
+ * Create an entity without leaving the form.
+ *
+ * A partner usually turns up while the split is being entered, and going to
+ * Settings → Entities to add them would discard the rows already typed.
+ *
+ * An exact name match is reused rather than duplicated: two entities with the
+ * same name are indistinguishable in every dropdown afterwards, and a
+ * duplicate silently splits a partner's holdings across two nodes so neither
+ * one totals correctly.
+ */
+export async function createEntityInline(input: {
+  name: string;
+  kind: 'person' | 'company';
+}): Promise<QuickEntityResult> {
+  const name = input.name.trim();
+  if (name === '') return { ok: false, error: 'Give the entity a name.' };
+  if (input.kind !== 'person' && input.kind !== 'company') {
+    return { ok: false, error: 'Pick whether this is a person or a company.' };
+  }
+
+  const existing = await prisma.entity.findFirst({
+    where: { name: { equals: name, mode: 'insensitive' } },
+  });
+  if (existing) {
+    revalidatePath('/', 'layout');
+    return { ok: true, id: existing.id, label: existing.name, reused: true };
+  }
+
+  const entity = await prisma.entity.create({ data: { name, kind: input.kind } });
+  revalidatePath('/', 'layout');
+  return { ok: true, id: entity.id, label: entity.name };
+}
