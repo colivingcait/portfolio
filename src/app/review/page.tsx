@@ -26,7 +26,7 @@ export default async function ReviewPage() {
     <>
       <PageHeader
         title="Review"
-        subtitle="Unmatched bank transactions only. Confirming one categorizes it and, unless you say otherwise, writes a payee rule that applies to every future import — and to anything already imported that it matches."
+        subtitle="Unmatched bank transactions only. No two lines from the same vendor read alike — the dates, trace numbers and order references all change — so each row shows the stable fragment a rule should match on, and how many other rows it would catch. Edit it if it grabbed the wrong part."
       />
 
       {unmatched.length === 0 ? (

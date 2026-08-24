@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { confirmTransaction } from '@/lib/import-actions';
+import { confirmTransaction, suggestRule, type RuleSuggestion } from '@/lib/import-actions';
 import { CATEGORIES } from '@/lib/engine/categories';
 import { formatCents } from '@/lib/engine/money';
 
@@ -12,7 +12,6 @@ interface Props {
   propertyName: string;
   description: string;
   amountCents: number;
-  /** A credit is far more likely to be income; default the list accordingly. */
   suggestion: string;
 }
 
@@ -21,24 +20,78 @@ export function ReviewRow({ id, date, propertyName, description, amountCents, su
   const [pending, startTransition] = useTransition();
   const [categoryKey, setCategoryKey] = useState(suggestion);
   const [createRule, setCreateRule] = useState(true);
+  const [rule, setRule] = useState<RuleSuggestion | null>(null);
+  const [match, setMatch] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+
+  // What a rule would latch onto, worked out before it is written.
+  useEffect(() => {
+    let cancelled = false;
+    suggestRule(id).then((result) => {
+      if (cancelled || !result) return;
+      setRule(result);
+      setMatch(result.match);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  function recount(next: string) {
+    setMatch(next);
+    suggestRule(id, next).then((result) => result && setRule(result));
+  }
 
   function confirm() {
     setError(null);
     startTransition(async () => {
-      const result = await confirmTransaction(id, categoryKey, createRule);
-      if (result.ok) router.refresh();
-      else setError(result.error ?? 'Could not save');
+      const result = await confirmTransaction(id, categoryKey, createRule, match);
+      if (result.ok) {
+        setDone(
+          result.alsoCategorized
+            ? `Also categorized ${result.alsoCategorized} more`
+            : 'Saved',
+        );
+        router.refresh();
+      } else {
+        setError(result.error ?? 'Could not save');
+      }
     });
   }
 
   return (
-    <tr className="hover:bg-surface-2/40">
+    <tr className="align-top hover:bg-surface-2/40">
       <td className="border-b border-line/60 px-2 py-2 num">{date}</td>
       <td className="border-b border-line/60 px-2 py-2 text-[12px] text-muted">{propertyName}</td>
-      <td className="border-b border-line/60 px-2 py-2 text-[12px]">
-        {description}
+      <td className="border-b border-line/60 px-2 py-2">
+        <div className="text-[12px] leading-snug">{description}</div>
+
+        {createRule ? (
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            <span className="text-[11px] text-muted">Match on</span>
+            <input
+              type="text"
+              aria-label="Rule match text"
+              value={match}
+              onChange={(e) => recount(e.target.value)}
+              className="max-w-[220px] py-0.5 text-[12px]"
+            />
+            {rule ? (
+              <span className="text-[11px] text-muted">
+                {rule.alsoMatches > 0 ? (
+                  <span className="text-good">catches {rule.alsoMatches} more here</span>
+                ) : (
+                  'this row only'
+                )}
+                {rule.confidence !== 'high' ? <span className="text-warn"> · check this one</span> : null}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+
         {error ? <div className="mt-0.5 text-[11px] text-bad">{error}</div> : null}
+        {done ? <div className="mt-0.5 text-[11px] text-good">{done}</div> : null}
       </td>
       <td className={`border-b border-line/60 px-2 py-2 num ${amountCents < 0 ? 'text-bad' : ''}`}>
         {formatCents(amountCents)}

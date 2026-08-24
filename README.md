@@ -53,7 +53,14 @@ statement against the wrong property.
 Once routed,
 and every row belongs to it: one account per property means the file answers "which property"
 by itself. payee rules classify what they recognise, the rest goes to Review, and confirming a
-row there writes the rule for every future import. Nothing posts unless
+row there writes the rule for every future import.
+
+No two lines from the same vendor read alike — dates, trace numbers and order references
+change every time — so Review works out the stable fragment first and shows it before the rule
+is written: the ACH originator name out of the middle of a blob (`Orig CO Name:Gas South LLC
+Orig ID:… Trace#:…` → `Gas South LLC`), or the merchant off a card purchase
+(`Card Purchase 06/30 Amazon.Com*Is6Tv3Bn3 …` → `Amazon.Com`). It also says how many other
+waiting rows the rule would catch, and the text is editable if it grabbed the wrong part. Nothing posts unless
 `opening + credits − debits = closing`.
 
 PDF statements are reconstructed from positioned text, which is heuristic — but nothing

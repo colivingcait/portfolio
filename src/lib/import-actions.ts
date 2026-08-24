@@ -10,11 +10,11 @@ import { matchAccount, readHints, type AccountCandidate, type AccountMatch } fro
 import {
   checkStatementBalance,
   classify,
-  normalizePayee,
   reviewList,
   type PayeeRule,
 } from './engine/bank';
 import { category } from './engine/categories';
+import { suggestPayee } from './import/payee';
 import { monthOf } from './engine/dates';
 
 export interface StatementPreview {
@@ -395,7 +395,9 @@ export async function confirmTransaction(
   transactionId: string,
   categoryKey: string,
   createRule: boolean,
-): Promise<{ ok: boolean; error?: string; ruleCreated?: boolean }> {
+  /** What the rule should match on. Defaults to the suggestion. */
+  ruleMatch?: string,
+): Promise<{ ok: boolean; error?: string; ruleCreated?: boolean; alsoCategorized?: number }> {
   if (!category(categoryKey)) return { ok: false, error: `Unknown category: ${categoryKey}` };
 
   const transaction = await prisma.bankTransaction.findUnique({
@@ -412,8 +414,9 @@ export async function confirmTransaction(
     data: { categoryKey, confirmed: true },
   });
 
+  let alsoCategorized = 0;
   if (createRule) {
-    const match = normalizePayee(transaction.description);
+    const match = (ruleMatch ?? suggestPayee(transaction.description).match).trim();
     const duplicate = await prisma.payeeRule.findFirst({ where: { bankAccountId, match } });
     if (!duplicate && match.length >= 3) {
       await prisma.payeeRule.create({ data: { bankAccountId, match, categoryKey, priority: 0 } });
@@ -430,6 +433,11 @@ export async function confirmTransaction(
           where: { id: { in: hits.map((h) => h.id) } },
           data: { categoryKey },
         });
+        alsoCategorized = hits.length;
+
+        // Those rows may span other months, all of which need recomputing.
+        const months = [...new Set(hits.map((h) => monthOf(requireIsoDate(h.date))))];
+        await recomputeMonths(transaction.statement.bankAccount.propertyId, months);
       }
     }
   }
@@ -437,7 +445,7 @@ export async function confirmTransaction(
   await recomputeMonths(transaction.statement.bankAccount.propertyId, [monthOf(requireIsoDate(transaction.date))]);
 
   revalidatePath('/', 'layout');
-  return { ok: true, ruleCreated };
+  return { ok: true, ruleCreated, alsoCategorized };
 }
 
 export async function deleteStatement(statementId: string): Promise<{ ok: boolean; error?: string }> {
@@ -453,4 +461,47 @@ export async function deleteStatement(statementId: string): Promise<{ ok: boolea
 
   revalidatePath('/', 'layout');
   return { ok: true };
+}
+
+
+export interface RuleSuggestion {
+  match: string;
+  reason: string;
+  confidence: 'high' | 'medium' | 'low';
+  /** How many other unmatched rows this rule would also catch. */
+  alsoMatches: number;
+}
+
+/**
+ * What to match on, and what it would pick up.
+ *
+ * Shown before the rule is written rather than after, because the difference
+ * between a rule that works next month and one that never fires again is
+ * whether it latched onto the vendor or onto a trace number.
+ */
+export async function suggestRule(transactionId: string, matchOverride?: string): Promise<RuleSuggestion | null> {
+  const transaction = await prisma.bankTransaction.findUnique({
+    where: { id: transactionId },
+    include: { statement: true },
+  });
+  if (!transaction) return null;
+
+  const suggestion = suggestPayee(transaction.description);
+  const match = (matchOverride ?? suggestion.match).trim();
+
+  const others = await prisma.bankTransaction.findMany({
+    where: {
+      id: { not: transactionId },
+      categoryKey: null,
+      statement: { bankAccountId: transaction.statement.bankAccountId },
+    },
+    select: { description: true },
+  });
+
+  return {
+    match,
+    reason: suggestion.reason,
+    confidence: suggestion.confidence,
+    alsoMatches: match === '' ? 0 : others.filter((o) => o.description.toLowerCase().includes(match.toLowerCase())).length,
+  };
 }
