@@ -87,6 +87,10 @@ connection string's host for the pooler's while keeping its username produces a 
 URL that fails with `P1000: Authentication failed` even when the password is correct — copy
 the pooler string whole rather than editing the direct one.
 
+`vercel.json` pins the framework to `nextjs`. Without it, a Vercel project created before the
+repository had any code detects no framework, treats the build as a static site and fails with
+`No Output Directory named "public" found` — after a build that otherwise succeeded.
+
 Paste the connection strings **bare**: no surrounding quotes, no `DATABASE_URL=` prefix.
 Vercel stores the value verbatim, so a copied-in quote makes the scheme `"postgresql` and the
 build fails with `P1013: The provided database string is invalid`. `DIRECT_URL` is the one
