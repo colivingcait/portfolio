@@ -1,14 +1,24 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/db';
-import { Empty, Money, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
+import { Empty, Note, PageHeader, Panel, Th } from '@/components/ui';
+import { ReviewRow } from '@/components/ReviewRow';
 
 export const dynamic = 'force-dynamic';
+
+/**
+ * A credit is nearly always income and a debit nearly always a cost, so the
+ * dropdown opens on the likelier side. It is a starting point, not a guess
+ * that gets saved on its own.
+ */
+function suggestionFor(amountCents: number): string {
+  return amountCents > 0 ? 'rental_income' : 'maintenance_repairs';
+}
 
 export default async function ReviewPage() {
   const unmatched = await prisma.bankTransaction.findMany({
     where: { categoryKey: null },
     include: { statement: { include: { bankAccount: { include: { property: true } } } } },
-    orderBy: { date: 'desc' },
+    orderBy: [{ date: 'desc' }],
     take: 200,
   });
 
@@ -16,14 +26,13 @@ export default async function ReviewPage() {
     <>
       <PageHeader
         title="Review"
-        subtitle="Unmatched bank transactions only. If this list is ever long, the rule table needs work."
+        subtitle="Unmatched bank transactions only. Confirming one categorizes it and, unless you say otherwise, writes a payee rule that applies to every future import — and to anything already imported that it matches."
       />
 
       {unmatched.length === 0 ? (
         <Panel>
           <Empty>
-            Nothing to review. Once statements are importing, only rows no payee rule matched land here — and
-            confirming one writes the rule for every future import.{' '}
+            Nothing to review. Every imported row matched a rule.{' '}
             <Link href="/settings/rules" className="underline">Payee rules</Link>
           </Empty>
         </Panel>
@@ -31,10 +40,12 @@ export default async function ReviewPage() {
         <>
           {unmatched.length > 25 ? (
             <Note>
-              {unmatched.length} unmatched rows. That is more than a handful of one-offs — the rule table needs work.
+              {unmatched.length} unmatched rows. That is more than a handful of one-offs — after the first two months
+              this list should be short, so if it stays long the rule table needs work.
             </Note>
           ) : null}
-          <Panel title={`${unmatched.length} unmatched`}>
+
+          <Panel title={`${unmatched.length} to categorize`}>
             <table>
               <thead>
                 <tr>
@@ -42,24 +53,33 @@ export default async function ReviewPage() {
                   <Th>Property</Th>
                   <Th>Description</Th>
                   <Th right>Amount</Th>
+                  <Th>Category</Th>
+                  <Th>Rule</Th>
+                  <Th />
                 </tr>
               </thead>
               <tbody>
                 {unmatched.map((transaction) => (
-                  <tr key={transaction.id}>
-                    <Td>
-                      <span className="num">{transaction.date.toISOString().slice(0, 10)}</span>
-                    </Td>
-                    <Td>{transaction.statement.bankAccount.property.name}</Td>
-                    <Td>{transaction.description}</Td>
-                    <Td right>
-                      <Money cents={transaction.amountCents} />
-                    </Td>
-                  </tr>
+                  <ReviewRow
+                    key={transaction.id}
+                    id={transaction.id}
+                    date={transaction.date.toISOString().slice(0, 10)}
+                    propertyName={transaction.statement.bankAccount.property.name}
+                    description={transaction.description}
+                    amountCents={transaction.amountCents}
+                    suggestion={suggestionFor(transaction.amountCents)}
+                  />
                 ))}
               </tbody>
             </table>
           </Panel>
+
+          <Note tone="muted">
+            Two categories worth reaching for: <strong>not portfolio</strong> for a charge that landed in an account it
+            does not belong to — it gets flagged as foreign rather than forced onto this property — and{' '}
+            <strong>security deposit received</strong>, which is a liability and stays off the P&amp;L so a move-in
+            month shows no phantom revenue.
+          </Note>
         </>
       )}
     </>

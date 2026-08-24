@@ -16,3 +16,4 @@ export * from './reconciliation';
 export * from './categories';
 export * from './bank';
 export * from './rollup';
+export * from './assemble';

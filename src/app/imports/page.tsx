@@ -1,70 +1,51 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/db';
-import { Badge, Empty, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
+import { Badge, Empty, Money, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
+import { StatementUploader } from '@/components/StatementUploader';
+import { DeleteStatementButton } from '@/components/DeleteStatementButton';
 
 export const dynamic = 'force-dynamic';
 
-const SOURCES = [
-  {
-    title: 'Bank statements',
-    step: 'Build step 2',
-    ready: false,
-    body: 'One account per property means the file is the property: pick the property, drop its statement, and every row belongs to it. Rows post only when opening + credits − debits ties to the closing balance — a partial statement is refused, not silently accepted.',
-  },
-  {
-    title: 'PadSplit — four files per month',
-    step: 'Build step 4',
-    ready: false,
-    body: 'summary.csv, billed.csv, collected.csv and earnings_table.csv, keyed by earnings month and never by payout month. Credits and payout come from earnings_table; the latest month is still collecting and is excluded from every rate.',
-  },
-  {
-    title: 'PM statement',
-    step: 'Build step 6 — blocked',
-    ready: false,
-    body: 'Blocked on a real sample. Until it exists, PM months reconcile in reduced form: expected = host earnings − 10.5% of gross collected, with the difference posted as a single line, PM opex (underived).',
-  },
-];
-
 export default async function ImportsPage() {
-  const [statements, padsplitImports] = await Promise.all([
+  const [accounts, statements, padsplitImports] = await Promise.all([
+    prisma.bankAccount.findMany({ include: { property: true }, where: { active: true }, orderBy: { label: 'asc' } }),
     prisma.bankStatement.findMany({
-      include: { bankAccount: { include: { property: true } } },
+      include: {
+        bankAccount: { include: { property: true } },
+        _count: { select: { transactions: true } },
+      },
       orderBy: { periodEnd: 'desc' },
-      take: 25,
+      take: 30,
     }),
-    prisma.padSplitImport.findMany({ orderBy: { importedAt: 'desc' }, take: 25 }),
+    prisma.padSplitImport.findMany({ orderBy: { importedAt: 'desc' }, take: 20 }),
   ]);
+
+  const options = accounts.map((a) => ({ value: a.id, label: `${a.property.name} · ${a.label}` }));
 
   return (
     <>
       <PageHeader
         title="Imports"
-        subtitle="A drop zone per source, import history, and reconciliation status per property-month: tied, does not tie, or awaiting PM statement."
+        subtitle="One account per property means the file is the property. Pick the account, drop its statement, and every row belongs to it — the only question left is what kind."
       />
 
-      <Note tone="muted">
-        No importer is wired up yet — this is build order steps 2, 4 and 6. The parsing and reconciliation rules they
-        will run are already written and tested; what is missing is the upload and persistence around them.
-      </Note>
-
-      <div className="mb-5 grid gap-3 sm:grid-cols-3">
-        {SOURCES.map((source) => (
-          <div key={source.title} className="rounded-lg border border-dashed border-line bg-surface px-4 py-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-[14px] font-medium">{source.title}</h3>
-              <Badge tone="warn">{source.step}</Badge>
-            </div>
-            <p className="mt-2 text-[12px] leading-relaxed text-muted">{source.body}</p>
-          </div>
-        ))}
-      </div>
+      {options.length === 0 ? (
+        <Note tone="bad">
+          No bank accounts yet. Add one per property in{' '}
+          <Link href="/settings/accounts" className="underline">Settings → Accounts</Link> before importing.
+        </Note>
+      ) : (
+        <Panel
+          title="Bank statement"
+          description="Nothing posts unless opening + credits − debits equals the closing balance. A statement that does not tie is refused rather than half-imported."
+        >
+          <StatementUploader accounts={options} />
+        </Panel>
+      )}
 
       <Panel title="Statement history">
         {statements.length === 0 ? (
-          <Empty>
-            Nothing imported yet. Accounts are configured in{' '}
-            <Link href="/settings/accounts" className="underline">Settings → Accounts</Link>.
-          </Empty>
+          <Empty>Nothing imported yet.</Empty>
         ) : (
           <table>
             <thead>
@@ -72,23 +53,39 @@ export default async function ImportsPage() {
                 <Th>Property</Th>
                 <Th>Account</Th>
                 <Th>Period</Th>
+                <Th right>Rows</Th>
+                <Th right>Opening</Th>
+                <Th right>Closing</Th>
                 <Th>Status</Th>
+                <Th />
               </tr>
             </thead>
             <tbody>
               {statements.map((statement) => (
                 <tr key={statement.id}>
                   <Td>{statement.bankAccount.property.name}</Td>
-                  <Td>{statement.bankAccount.label}</Td>
+                  <Td>
+                    <span className="text-[12px] text-muted">{statement.bankAccount.label}</span>
+                  </Td>
                   <Td>
                     <span className="num">
                       {statement.periodStart.toISOString().slice(0, 10)} → {statement.periodEnd.toISOString().slice(0, 10)}
                     </span>
                   </Td>
+                  <Td right>{statement._count.transactions}</Td>
+                  <Td right>
+                    <Money cents={statement.openingBalanceCents} muted />
+                  </Td>
+                  <Td right>
+                    <Money cents={statement.closingBalanceCents} muted />
+                  </Td>
                   <Td>
                     <Badge tone={statement.status === 'posted' ? 'good' : statement.status === 'rejected' ? 'bad' : 'warn'}>
-                      {statement.status}
+                      {statement.status === 'posted' ? 'tied' : statement.status}
                     </Badge>
+                  </Td>
+                  <Td>
+                    <DeleteStatementButton id={statement.id} />
                   </Td>
                 </tr>
               ))}
@@ -97,36 +94,18 @@ export default async function ImportsPage() {
         )}
       </Panel>
 
-      <Panel title="PadSplit history">
-        {padsplitImports.length === 0 ? (
-          <Empty>Nothing imported yet.</Empty>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <Th>Earnings month</Th>
-                <Th>File</Th>
-                <Th>Kind</Th>
-                <Th right>Rows</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {padsplitImports.map((row) => (
-                <tr key={row.id}>
-                  <Td>
-                    <span className="num">{row.earningsMonth}</span>
-                  </Td>
-                  <Td>{row.fileName}</Td>
-                  <Td>
-                    <span className="text-[12px] text-muted">{row.fileKind}</span>
-                  </Td>
-                  <Td right>{row.rowCount}</Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+      <Panel
+        title="PadSplit"
+        description="Four files per month, keyed by earnings month. Build step 4 — the reconciliation rules are written and tested, the importer around them is not."
+      >
+        {padsplitImports.length === 0 ? <Empty>Nothing imported yet.</Empty> : null}
       </Panel>
+
+      <Note tone="muted">
+        The PM statement importer is blocked on a real sample. Until it exists, PM-managed months reconcile in reduced
+        form: expected = host earnings − 10.5% of gross collected, with the difference posted as a single line, PM opex
+        (underived).
+      </Note>
     </>
   );
 }

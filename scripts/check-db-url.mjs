@@ -62,8 +62,13 @@ function describe(name, raw) {
   const port = url.port || '(none)';
   console.log(`  ${name}: ${scheme}://${url.username ? '<user>' : '(no user)'}:${url.password ? '<password>' : '(NO PASSWORD)'}@${url.hostname}:${port}${url.pathname}`);
 
-  if (!url.password) {
+  // A local development database on trust auth legitimately has no password;
+  // a hosted one never does. Only fail where it must be wrong.
+  const isLocal = ['localhost', '127.0.0.1', '::1'].includes(url.hostname);
+  if (!url.password && !isLocal) {
     problems.push(`${name} carries no password.`);
+  } else if (!url.password) {
+    console.log('    note: no password — fine for a local database on trust auth.');
   }
 
   // Supavisor authenticates as postgres.<project-ref>, not plain postgres.

@@ -21,9 +21,15 @@ effective-share traversal and the maturity ladder working. Useful the day it shi
   category vocabulary.
 - **Imports / Review** — the screens exist and say plainly what they are waiting on.
 
+**Build order step 2 (§13.2) — bank statement import.** Pick a property's account, drop its CSV,
+and every row belongs to it: one account per property means the file answers "which property"
+by itself. Payee rules classify what they recognise, the rest goes to Review, and confirming a
+row there writes the rule for every future import. Nothing posts unless
+`opening + credits − debits = closing`.
+
 ## What is not built
 
-Steps 2 through 7 of §13, in that order: bank statement import, backfill, PadSplit import,
+Steps 3 through 7 of §13, in that order: the historical backfill, PadSplit import,
 PM reconciliation in reduced form, the PM statement importer (blocked on a real sample),
 and projections (not before October, and not because of the code — §13).
 
