@@ -9,7 +9,7 @@
 
 import { CATEGORIES, category, type CategoryCatalog, type ScheduleELine } from './categories';
 import type { MonthKey } from './dates';
-import { sumCents, type Cents } from './money';
+import { formatCents, sumCents, type Cents } from './money';
 
 export const SCHEDULE_E_LINES: { line: ScheduleELine; number: number; label: string }[] = [
   { line: 'advertising', number: 5, label: 'Advertising' },
@@ -62,6 +62,12 @@ export interface ScheduleEReport {
   capitalizableTotalCents: Cents;
   /** Real cash movements that are not reportable either way. */
   excludedCents: Cents;
+  /**
+   * Escrow paid in for which no disbursement split is on record. It is not in
+   * the expense total: what is deductible is what the servicer paid out, and
+   * that comes off the year-end escrow analysis.
+   */
+  unallocatedEscrowCents: Cents;
   /** Anything still uncategorized. A report with these in it is not finished. */
   uncategorizedCents: Cents;
   uncategorizedCount: number;
@@ -80,6 +86,16 @@ export interface ScheduleEInput {
   mortgageInterestCents: Cents;
   /** Interest on notes that are not mortgages, where you separate them. */
   otherInterestCents?: Cents;
+  /**
+   * Escrow. Money paid INTO escrow is not a deduction — the bills the servicer
+   * pays OUT of it are, and those never appear as a bank line because they are
+   * settled inside the mortgage payment. Where the disbursements are known
+   * they post to the taxes and insurance lines; where they are not, the amount
+   * paid in is reported as an unallocated memo rather than guessed at.
+   */
+  escrowPaidCents?: Cents;
+  escrowTaxCents?: Cents;
+  escrowInsuranceCents?: Cents;
   /** Built-ins plus anything added later. */
   catalog?: CategoryCatalog;
 }
@@ -146,6 +162,18 @@ export function buildScheduleE(input: ScheduleEInput): ScheduleEReport {
     byLine.set('other_interest', bucket);
   }
 
+  // Escrow disbursements, where the servicer's split is known.
+  if (input.escrowTaxCents && input.escrowTaxCents > 0) {
+    const bucket = byLine.get('taxes') ?? new Map<string, Cents>();
+    bucket.set('__escrow__', (bucket.get('__escrow__') ?? 0) + input.escrowTaxCents);
+    byLine.set('taxes', bucket);
+  }
+  if (input.escrowInsuranceCents && input.escrowInsuranceCents > 0) {
+    const bucket = byLine.get('insurance') ?? new Map<string, Cents>();
+    bucket.set('__escrow__', (bucket.get('__escrow__') ?? 0) + input.escrowInsuranceCents);
+    byLine.set('insurance', bucket);
+  }
+
   const lines: ScheduleELineTotal[] = SCHEDULE_E_LINES.map((definition) => {
     const bucket = byLine.get(definition.line);
     const from = bucket
@@ -182,6 +210,14 @@ export function buildScheduleE(input: ScheduleEInput): ScheduleEReport {
     );
   }
 
+  const escrowAllocated = (input.escrowTaxCents ?? 0) + (input.escrowInsuranceCents ?? 0);
+  const unallocatedEscrow = Math.max(0, (input.escrowPaidCents ?? 0) - escrowAllocated);
+  if (unallocatedEscrow > 0) {
+    warnings.push(
+      `${formatCents(unallocatedEscrow)} went into escrow with no disbursement split on record, so it is not on any line. What the servicer paid out for taxes and insurance is deductible; what you paid in is not. Enter the annual amounts on the loan, or hand your accountant the servicer's year-end escrow analysis.`,
+    );
+  }
+
   return {
     year: input.year,
     propertyId: input.propertyId,
@@ -197,6 +233,7 @@ export function buildScheduleE(input: ScheduleEInput): ScheduleEReport {
     })),
     capitalizableTotalCents: sumCents([...capitalizable.values()].map((v) => v.amountCents)),
     excludedCents: excluded,
+    unallocatedEscrowCents: unallocatedEscrow,
     uncategorizedCents: uncategorized,
     uncategorizedCount,
     warnings,

@@ -18,6 +18,8 @@ export interface RawTransaction {
   runningBalanceCents?: Cents | null;
 }
 
+export type RuleDirection = 'any' | 'debit' | 'credit';
+
 export interface PayeeRule {
   id: string;
   /** Null applies the rule to every account. */
@@ -25,6 +27,12 @@ export interface PayeeRule {
   /** Case-insensitive substring of the description. */
   match: string;
   categoryKey: string;
+  /**
+   * Which way the money has to be going for this rule to apply. A transfer to
+   * your own account reads identically whether it was a draw or a
+   * contribution; the sign is the only thing that distinguishes them.
+   */
+  direction?: RuleDirection;
   /** Higher wins; ties break on the longer, more specific match. */
   priority?: number;
 }
@@ -44,17 +52,26 @@ export function matchRule(
   rules: readonly PayeeRule[],
   description: string,
   bankAccountId: string | null,
+  amountCents?: Cents,
 ): PayeeRule | null {
   const haystack = description.toLowerCase();
-  const candidates = rules.filter(
-    (r) =>
-      (r.bankAccountId === null || r.bankAccountId === bankAccountId) &&
-      r.match.trim() !== '' &&
-      haystack.includes(r.match.toLowerCase()),
-  );
+  const movement: RuleDirection | null =
+    amountCents === undefined ? null : amountCents < 0 ? 'debit' : 'credit';
+
+  const candidates = rules.filter((r) => {
+    if (r.bankAccountId !== null && r.bankAccountId !== bankAccountId) return false;
+    if (r.match.trim() === '') return false;
+    if (!haystack.includes(r.match.toLowerCase())) return false;
+    const direction = r.direction ?? 'any';
+    if (direction === 'any' || movement === null) return true;
+    return direction === movement;
+  });
   if (candidates.length === 0) return null;
 
   return candidates.sort((a, b) => {
+    // A rule that names a direction is more specific than one that does not.
+    const directed = Number((b.direction ?? 'any') !== 'any') - Number((a.direction ?? 'any') !== 'any');
+    if (directed !== 0) return directed;
     const p = (b.priority ?? 0) - (a.priority ?? 0);
     if (p !== 0) return p;
     return b.match.length - a.match.length;
@@ -67,7 +84,7 @@ export function classify(
   bankAccountId: string | null,
 ): ClassifiedTransaction[] {
   return transactions.map((t) => {
-    const rule = matchRule(rules, t.description, bankAccountId);
+    const rule = matchRule(rules, t.description, bankAccountId, t.amountCents);
     return {
       ...t,
       categoryKey: rule ? rule.categoryKey : null,

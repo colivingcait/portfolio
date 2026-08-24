@@ -146,6 +146,79 @@ export default async function PayoutsPage({
       )}
 
       <Panel
+        title="Distribution check"
+        description="What the statements show leaving for owners this month, against what the capital accounts recorded. Matched on the date the money moved, so a September split paid in October is checked against October."
+      >
+        {data.distributionCheck.length === 0 ? (
+          <Empty>
+            No owner draws or contributions on the imported statements for {month}, and nothing recorded against it
+            either. Nothing to check.
+          </Empty>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <Th>Property</Th>
+                <Th right>Draws on statement</Th>
+                <Th right>Distributions recorded</Th>
+                <Th right>Contributions on statement</Th>
+                <Th right>Contributions recorded</Th>
+                <Th>Status</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.distributionCheck.map((row) => (
+                <tr key={row.propertyId ?? row.propertyName}>
+                  <Td>{row.propertyName}</Td>
+                  <Td right>
+                    <Money cents={row.bankDrawsCents} />
+                  </Td>
+                  <Td right>
+                    <Money cents={row.recordedDistributionsCents} muted={row.drawDifferenceCents === 0} />
+                  </Td>
+                  <Td right>
+                    <Money cents={row.bankContributionsCents} />
+                  </Td>
+                  <Td right>
+                    <Money cents={row.recordedContributionsCents} muted={row.contributionDifferenceCents === 0} />
+                  </Td>
+                  <Td>
+                    {row.status === 'tied' ? (
+                      <Badge tone="good">Ties</Badge>
+                    ) : (
+                      <div className="flex flex-wrap gap-1">
+                        {row.drawDifferenceCents !== 0 && (
+                          <Badge tone="warn">
+                            Draws {formatCents(Math.abs(row.drawDifferenceCents))}{' '}
+                            {row.drawDifferenceCents > 0 ? 'unrecorded' : 'over-recorded'}
+                          </Badge>
+                        )}
+                        {row.contributionDifferenceCents !== 0 && (
+                          <Badge tone="warn">
+                            Contributions {formatCents(Math.abs(row.contributionDifferenceCents))}{' '}
+                            {row.contributionDifferenceCents > 0 ? 'unrecorded' : 'over-recorded'}
+                          </Badge>
+                        )}
+                      </div>
+                    )}
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {data.distributionCheck.some((r) => r.status === 'differs') && (
+          <Note tone="warn">
+            A gap here means the two records of the same event disagree. Money that left the account without a
+            distribution recorded overstates what an investor is still owed back on sale; a distribution recorded
+            without a transfer understates it. Either record the missing entry in{' '}
+            <Link href="/settings/capital" className="underline">Settings → Capital</Link>, or fix the category on the
+            statement row in <Link href="/review" className="underline">Review</Link>.
+          </Note>
+        )}
+      </Panel>
+
+      <Panel
         title="Capital accounts"
         description="Money an investor put in, and what is still owed back. A profit distribution does not reduce it — only capital handed back does."
       >

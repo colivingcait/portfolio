@@ -98,14 +98,25 @@ export async function getYearReport(year: number, entityId?: string | null) {
     let mortgageInterest = 0;
     let principalPaid = 0;
     let debtService = 0;
+    let escrowPaid = 0;
+    let escrowTax = 0;
+    let escrowInsurance = 0;
     for (const loan of loans.filter((l) => l.propertyId === property.id)) {
       const schedule = buildSchedule(toLoanTerms(loan), loan.payments.map(toLoanPayment));
+      let monthsInYear = 0;
       for (const row of schedule) {
         if (!months.includes(row.month)) continue;
+        monthsInYear += 1;
         mortgageInterest += row.interestCents;
         principalPaid += row.principalCents + row.extraPrincipalCents;
         debtService += row.paymentCents;
+        escrowPaid += row.escrowCents;
       }
+      // A loan that ran for part of the year disbursed part of the year's
+      // bills, so the annual figures are prorated by months scheduled.
+      const share = Math.min(monthsInYear, 12) / 12;
+      escrowTax += Math.round((loan.escrowTaxAnnualCents ?? 0) * share);
+      escrowInsurance += Math.round((loan.escrowInsuranceAnnualCents ?? 0) * share);
     }
 
     const scheduleE = buildScheduleE({
@@ -113,6 +124,9 @@ export async function getYearReport(year: number, entityId?: string | null) {
       propertyId: property.id,
       transactions: propertyTransactions,
       mortgageInterestCents: mortgageInterest,
+      escrowPaidCents: escrowPaid,
+      escrowTaxCents: escrowTax,
+      escrowInsuranceCents: escrowInsurance,
       catalog,
     });
 

@@ -126,10 +126,10 @@ export function RecordForm({ modelKey, fields, id = null, initial = {}, submitLa
                 onChange={(e) => set(field.name, e.target.value)}
                 className={invalid ? 'border-bad!' : undefined}
               >
-                {!field.required || field.emptyLabel ? (
+                {/* A field with a default is never blank, so offering blank
+                    above the default just reads as a second empty choice. */}
+                {field.defaultValue !== undefined && !field.emptyLabel ? null : (
                   <option value="">{field.emptyLabel ?? '—'}</option>
-                ) : (
-                  <option value="">—</option>
                 )}
                 {(field.options ?? []).map((option) => (
                   <option key={option.value} value={option.value}>

@@ -229,6 +229,36 @@ export function isCapitalizable(key: string, catalog?: CategoryCatalog): boolean
   return category(key, catalog)?.taxTreatment === 'capitalizable';
 }
 
+/**
+ * Categories that come in pairs, one for each direction the money moved.
+ *
+ * The description on a transfer between your own accounts is identical
+ * whichever way it went — only the sign says whether you took money out or put
+ * it in. A single rule per payee would get one of them wrong every time.
+ */
+export const DIRECTIONAL_PAIRS: { debit: string; credit: string }[] = [
+  { debit: 'owner_draw', credit: 'owner_contribution' },
+  { debit: 'security_deposit_returned', credit: 'security_deposit_received' },
+];
+
+/** The category this one becomes when the money goes the other way. */
+export function oppositeCategory(key: string): { key: string; direction: 'debit' | 'credit' } | null {
+  for (const pair of DIRECTIONAL_PAIRS) {
+    if (pair.debit === key) return { key: pair.credit, direction: 'credit' };
+    if (pair.credit === key) return { key: pair.debit, direction: 'debit' };
+  }
+  return null;
+}
+
+/** Which way a category expects money to move, where it only makes sense one way. */
+export function expectedDirection(key: string): 'debit' | 'credit' | null {
+  for (const pair of DIRECTIONAL_PAIRS) {
+    if (pair.debit === key) return 'debit';
+    if (pair.credit === key) return 'credit';
+  }
+  return null;
+}
+
 export const DEPOSIT_LIABILITY_CATEGORIES = [
   'security_deposit_received',
   'security_deposit_returned',

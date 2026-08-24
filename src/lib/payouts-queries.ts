@@ -8,11 +8,13 @@ import {
   paymentsDueIn,
   payoutTotals,
   planDistribution,
+  reconcileDistributions,
   type CapitalEntry,
+  type DistributionCheckRow,
   type DuePayment,
   type OwnerShare,
 } from './engine/payouts';
-import { monthEnd, type MonthKey } from './engine/dates';
+import { monthEnd, monthStart, type MonthKey } from './engine/dates';
 
 export interface PropertyPayout {
   propertyId: string;
@@ -37,6 +39,7 @@ export interface PayoutsData {
     returnedCents: number;
     outstandingCents: number;
   }[];
+  distributionCheck: DistributionCheckRow[];
   entities: { value: string; label: string }[];
   properties_: { value: string; label: string }[];
 }
@@ -44,7 +47,7 @@ export interface PayoutsData {
 export async function getPayouts(month: MonthKey): Promise<PayoutsData> {
   const asOf = monthEnd(month);
 
-  const [properties, interests, entities, loans, rollups, capitalEntries] = await Promise.all([
+  const [properties, interests, entities, loans, rollups, capitalEntries, ownerMovements] = await Promise.all([
     prisma.property.findMany({ orderBy: { name: 'asc' } }),
     prisma.ownershipInterest.findMany(),
     prisma.entity.findMany({ orderBy: { name: 'asc' } }),
@@ -55,6 +58,14 @@ export async function getPayouts(month: MonthKey): Promise<PayoutsData> {
     }),
     prisma.monthlyPropertyRollup.findMany({ where: { month, basis: 'cash' } }),
     prisma.capitalAccountEntry.findMany({ include: { entity: true, property: true } }),
+    // Owner movements the statements actually show, for the distribution check.
+    prisma.bankTransaction.findMany({
+      where: {
+        categoryKey: { in: ['owner_draw', 'owner_contribution'] },
+        date: { gte: new Date(`${monthStart(month)}T00:00:00Z`), lte: new Date(`${asOf}T00:00:00Z`) },
+      },
+      include: { statement: { include: { bankAccount: true } } },
+    }),
   ]);
 
   const engineInterests = interests.map(toOwnershipInterest);
@@ -137,12 +148,41 @@ export async function getPayouts(month: MonthKey): Promise<PayoutsData> {
     }));
   });
 
+  // Bank against books, by payment date. A property with neither is dropped so
+  // the panel shows only the months and houses where money actually moved.
+  const movedByProperty = new Map<string, typeof ownerMovements>();
+  for (const movement of ownerMovements) {
+    const propertyId = movement.statement.bankAccount.propertyId;
+    const list = movedByProperty.get(propertyId) ?? [];
+    list.push(movement);
+    movedByProperty.set(propertyId, list);
+  }
+
+  const inMonth = capitalEntries.filter((e) => requireIsoDate(e.date).startsWith(month));
+  const distributionCheck = reconcileDistributions(
+    properties.map((property) => ({
+      propertyId: property.id,
+      propertyName: property.name,
+      movements: (movedByProperty.get(property.id) ?? []).map((m) => ({
+        amountCents: m.amountCents,
+        categoryKey: m.categoryKey ?? '',
+      })),
+      recordedDistributionsCents: inMonth
+        .filter((e) => e.propertyId === property.id && e.kind === 'distribution')
+        .reduce((sum, e) => sum + e.amountCents, 0),
+      recordedContributionsCents: inMonth
+        .filter((e) => e.propertyId === property.id && e.kind === 'contribution')
+        .reduce((sum, e) => sum + e.amountCents, 0),
+    })),
+  ).filter((row) => row.status !== 'nothing_to_check');
+
   return {
     month,
     properties: payoutProperties,
     due,
     totals: payoutTotals(due, allAllocations),
     capital: capital.filter((c) => c.contributedCents !== 0 || c.profitDistributedCents !== 0),
+    distributionCheck,
     entities: entities.map((e) => ({ value: e.id, label: e.name })),
     properties_: properties.map((p) => ({ value: p.id, label: p.name })),
   };

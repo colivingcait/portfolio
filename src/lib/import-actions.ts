@@ -13,7 +13,7 @@ import {
   reviewList,
   type PayeeRule,
 } from './engine/bank';
-import { category } from './engine/categories';
+import { category, oppositeCategory } from './engine/categories';
 import { suggestPayee } from './import/payee';
 import { monthOf } from './engine/dates';
 
@@ -419,7 +419,23 @@ export async function confirmTransaction(
     const match = (ruleMatch ?? suggestPayee(transaction.description).match).trim();
     const duplicate = await prisma.payeeRule.findFirst({ where: { bankAccountId, match } });
     if (!duplicate && match.length >= 3) {
-      await prisma.payeeRule.create({ data: { bankAccountId, match, categoryKey, priority: 0 } });
+      // Where a category has an opposite — a draw against a contribution, a
+      // deposit taken against one returned — the same payee means different
+      // things depending on which way the money went. One rule per direction,
+      // written together, so the other half is never wrong later.
+      const opposite = oppositeCategory(categoryKey);
+      const thisWay = transaction.amountCents < 0 ? 'debit' : 'credit';
+
+      if (opposite) {
+        await prisma.payeeRule.createMany({
+          data: [
+            { bankAccountId, match, categoryKey, direction: thisWay, priority: 0 },
+            { bankAccountId, match, categoryKey: opposite.key, direction: opposite.direction, priority: 0 },
+          ],
+        });
+      } else {
+        await prisma.payeeRule.create({ data: { bankAccountId, match, categoryKey, direction: 'any', priority: 0 } });
+      }
       ruleCreated = true;
 
       // Apply it to everything already imported on this account that is still
@@ -427,12 +443,29 @@ export async function confirmTransaction(
       const orphans = await prisma.bankTransaction.findMany({
         where: { statement: { bankAccountId }, categoryKey: null },
       });
+      const opposite2 = oppositeCategory(categoryKey);
       const hits = orphans.filter((o) => o.description.toLowerCase().includes(match.toLowerCase()));
+
       if (hits.length > 0) {
-        await prisma.bankTransaction.updateMany({
-          where: { id: { in: hits.map((h) => h.id) } },
-          data: { categoryKey },
-        });
+        if (opposite2) {
+          // Each row takes the category its own direction calls for.
+          const sameWay = hits.filter((h) => (h.amountCents < 0) === (transaction.amountCents < 0));
+          const otherWay = hits.filter((h) => (h.amountCents < 0) !== (transaction.amountCents < 0));
+          if (sameWay.length) {
+            await prisma.bankTransaction.updateMany({ where: { id: { in: sameWay.map((h) => h.id) } }, data: { categoryKey } });
+          }
+          if (otherWay.length) {
+            await prisma.bankTransaction.updateMany({
+              where: { id: { in: otherWay.map((h) => h.id) } },
+              data: { categoryKey: opposite2.key },
+            });
+          }
+        } else {
+          await prisma.bankTransaction.updateMany({
+            where: { id: { in: hits.map((h) => h.id) } },
+            data: { categoryKey },
+          });
+        }
         alsoCategorized = hits.length;
 
         // Those rows may span other months, all of which need recomputing.

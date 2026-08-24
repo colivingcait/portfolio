@@ -183,3 +183,56 @@ describe('categories that need care (§7)', () => {
     expect(totals.netCashCents).toBe(cents(4_780));
   });
 });
+
+describe('rules that depend on which way the money moved', () => {
+  // The same transfer line means two different things by sign: out of the
+  // operating account it is an owner draw, into it a contribution.
+  const directional: PayeeRule[] = [
+    { id: 'd1', bankAccountId: ACCOUNT, match: 'Chk ...0977 Transaction#', categoryKey: 'owner_draw', direction: 'debit' },
+    { id: 'd2', bankAccountId: ACCOUNT, match: 'Chk ...0977 Transaction#', categoryKey: 'owner_contribution', direction: 'credit' },
+  ];
+
+  it('reads a negative amount as the debit side', () => {
+    const rule = matchRule(directional, 'Online Transfer To Chk ...0977 Transaction# 22841', ACCOUNT, cents(-4_000));
+    expect(rule?.categoryKey).toBe('owner_draw');
+  });
+
+  it('reads a positive amount as the credit side', () => {
+    const rule = matchRule(directional, 'Online Transfer From Chk ...0977 Transaction# 22902', ACCOUNT, cents(4_000));
+    expect(rule?.categoryKey).toBe('owner_contribution');
+  });
+
+  it('declines to guess when no amount is supplied', () => {
+    // Both sides match; picking one at random would be worse than picking the
+    // first deterministically, but either way the caller must pass the amount.
+    const rule = matchRule(directional, 'Chk ...0977 Transaction# 1', ACCOUNT);
+    expect(rule).not.toBeNull();
+  });
+
+  it('prefers a directed rule over an undirected one that also matches', () => {
+    const mixed: PayeeRule[] = [
+      { id: 'a', bankAccountId: ACCOUNT, match: 'TRANSFER', categoryKey: 'owner_draw', priority: 5 },
+      { id: 'b', bankAccountId: ACCOUNT, match: 'TRANSFER', categoryKey: 'owner_contribution', direction: 'credit' },
+    ];
+    expect(matchRule(mixed, 'ONLINE TRANSFER', ACCOUNT, cents(2_000))?.id).toBe('b');
+  });
+
+  it('falls back to the undirected rule when the sign does not fit the directed one', () => {
+    const mixed: PayeeRule[] = [
+      { id: 'a', bankAccountId: ACCOUNT, match: 'TRANSFER', categoryKey: 'owner_draw' },
+      { id: 'b', bankAccountId: ACCOUNT, match: 'TRANSFER', categoryKey: 'owner_contribution', direction: 'credit' },
+    ];
+    expect(matchRule(mixed, 'ONLINE TRANSFER', ACCOUNT, cents(-2_000))?.id).toBe('a');
+  });
+
+  it('classifies a whole statement by sign from one pair of rules', () => {
+    const rows: RawTransaction[] = [
+      { date: '2026-06-30', description: 'Online Transfer To Chk ...0977 Transaction# 1', amountCents: cents(-3_000) },
+      { date: '2026-07-02', description: 'Online Transfer From Chk ...0977 Transaction# 2', amountCents: cents(1_500) },
+    ];
+    expect(classify(rows, directional, ACCOUNT).map((t) => t.categoryKey)).toEqual([
+      'owner_draw',
+      'owner_contribution',
+    ]);
+  });
+});

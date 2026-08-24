@@ -259,3 +259,83 @@ export function payoutTotals(due: readonly DuePayment[], allocations: readonly O
 export function interestOn(principalCents: Cents, annualRatePercent: number, perYear: number): Cents {
   return roundCents((principalCents * annualRatePercent) / 100 / perYear);
 }
+
+/**
+ * Distributions the bank saw, against distributions the capital accounts
+ * recorded (§3, §7).
+ *
+ * Two records of the same event drift apart quietly: a transfer gets made and
+ * never entered, or gets entered twice, and the capital position — the number
+ * that decides what an investor is owed back on sale — is wrong from then on.
+ * This compares them per property per month and says by how much.
+ *
+ * The comparison is by PAYMENT date, not earnings month. A September split
+ * paid in October left the account in October, so October is where the bank
+ * shows it; matching on earnings month would flag every property that pays in
+ * arrears.
+ */
+export interface OwnerMovement {
+  /** Credits positive, debits negative, exactly as the statement has it. */
+  amountCents: Cents;
+  categoryKey: string;
+}
+
+export interface DistributionCheckRow {
+  propertyId: string | null;
+  propertyName: string;
+  /** Money out to owners, as a positive figure. */
+  bankDrawsCents: Cents;
+  recordedDistributionsCents: Cents;
+  /** Money in from owners, as a positive figure. */
+  bankContributionsCents: Cents;
+  recordedContributionsCents: Cents;
+  /** Bank less recorded. Positive means the bank moved more than was recorded. */
+  drawDifferenceCents: Cents;
+  contributionDifferenceCents: Cents;
+  status: 'tied' | 'differs' | 'nothing_to_check';
+}
+
+export function reconcileDistributions(
+  rows: readonly {
+    propertyId: string | null;
+    propertyName: string;
+    movements: readonly OwnerMovement[];
+    recordedDistributionsCents: Cents;
+    recordedContributionsCents: Cents;
+  }[],
+): DistributionCheckRow[] {
+  return rows.map((row) => {
+    // A draw is money leaving, so it arrives negative; report it positive.
+    const bankDraws = sumCents(
+      row.movements.filter((m) => m.categoryKey === 'owner_draw').map((m) => -m.amountCents),
+    );
+    const bankContributions = sumCents(
+      row.movements.filter((m) => m.categoryKey === 'owner_contribution').map((m) => m.amountCents),
+    );
+
+    const drawDifference = bankDraws - row.recordedDistributionsCents;
+    const contributionDifference = bankContributions - row.recordedContributionsCents;
+
+    const nothing =
+      bankDraws === 0 &&
+      bankContributions === 0 &&
+      row.recordedDistributionsCents === 0 &&
+      row.recordedContributionsCents === 0;
+
+    return {
+      propertyId: row.propertyId,
+      propertyName: row.propertyName,
+      bankDrawsCents: bankDraws,
+      recordedDistributionsCents: row.recordedDistributionsCents,
+      bankContributionsCents: bankContributions,
+      recordedContributionsCents: row.recordedContributionsCents,
+      drawDifferenceCents: drawDifference,
+      contributionDifferenceCents: contributionDifference,
+      status: nothing
+        ? 'nothing_to_check'
+        : drawDifference === 0 && contributionDifference === 0
+          ? 'tied'
+          : 'differs',
+    };
+  });
+}

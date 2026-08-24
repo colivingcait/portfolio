@@ -511,6 +511,10 @@ model PayeeRule {
   bankAccountId String?
   match         String
   categoryKey   String
+  /// any | debit | credit. The same payee can mean opposite things depending
+  /// on which way the money went: a transfer to your own account is a draw
+  /// going out and a contribution coming in, and the description is identical.
+  direction     String   @default("any")
   priority      Int      @default(0)
   createdAt     DateTime @default(now())
 
@@ -551,33 +555,40 @@ enum PaymentFrequency {
 }
 
 model Loan {
-  id                     String           @id @default(cuid())
-  propertyId             String
-  lender                 String
-  type                   LoanType
-  lienPosition           Int?
-  originalPrincipalCents Int
+  id                         String           @id @default(cuid())
+  propertyId                 String
+  lender                     String
+  type                       LoanType
+  lienPosition               Int?
+  originalPrincipalCents     Int
   /// Whole-number annual rate: 7.25 means 7.25%.
-  ratePercent            Decimal          @db.Decimal(7, 4)
-  startDate              DateTime         @db.Date
-  firstPaymentDate       DateTime         @db.Date
-  termMonths             Int?
-  maturityDate           DateTime?        @db.Date
-  paymentAmountCents     Int?
-  paymentFrequency       PaymentFrequency @default(monthly)
-  structure              LoanStructure
-  balloonAmountCents     Int?
-  paymentDayOfMonth      Int?
-  escrowIncluded         Boolean          @default(false)
-  escrowCents            Int?
+  ratePercent                Decimal          @db.Decimal(7, 4)
+  startDate                  DateTime         @db.Date
+  firstPaymentDate           DateTime         @db.Date
+  termMonths                 Int?
+  maturityDate               DateTime?        @db.Date
+  paymentAmountCents         Int?
+  paymentFrequency           PaymentFrequency @default(monthly)
+  structure                  LoanStructure
+  balloonAmountCents         Int?
+  paymentDayOfMonth          Int?
+  escrowIncluded             Boolean          @default(false)
+  escrowCents                Int?
+  /// What the servicer actually disburses from escrow in a year. Money paid
+  /// INTO escrow is not deductible — the tax and insurance bills the servicer
+  /// pays OUT of it are, and those bills never appear as a bank line because
+  /// they are settled inside the mortgage payment. Left blank, the year-end
+  /// report shows escrow as an unallocated memo instead of guessing.
+  escrowTaxAnnualCents       Int?
+  escrowInsuranceAnnualCents Int?
   /// A pro-rata debt share is an economic figure, not a legal one. Where this
   /// is set, the maturity ladder shows the WHOLE balance as exposure
   /// alongside the pro-rata share (§3, the debt caveat).
-  personallyGuaranteed   Boolean          @default(false)
-  status                 LoanStatus       @default(active)
-  notes                  String?
-  createdAt              DateTime         @default(now())
-  updatedAt              DateTime         @updatedAt
+  personallyGuaranteed       Boolean          @default(false)
+  status                     LoanStatus       @default(active)
+  notes                      String?
+  createdAt                  DateTime         @default(now())
+  updatedAt                  DateTime         @updatedAt
 
   property Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   payments LoanPayment[]

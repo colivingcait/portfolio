@@ -8,6 +8,12 @@ import { withOptions } from '../_shared/helpers';
 import { getCategoryCatalog } from '@/lib/categories-queries';
 import { category } from '@/lib/engine/categories';
 
+const DIRECTION_LABEL: Record<string, string> = {
+  any: 'Any amount',
+  debit: 'Money out',
+  credit: 'Money in',
+};
+
 export const dynamic = 'force-dynamic';
 
 export default async function RulesPage() {
@@ -43,6 +49,7 @@ export default async function RulesPage() {
                 <Th>Account</Th>
                 <Th>Description contains</Th>
                 <Th>Category</Th>
+                <Th>Applies to</Th>
                 <Th right>Priority</Th>
                 <Th />
               </tr>
@@ -59,6 +66,9 @@ export default async function RulesPage() {
                     <code className="text-[12px]">{rule.match}</code>
                   </Td>
                   <Td>{category(rule.categoryKey, catalog)?.label ?? rule.categoryKey}</Td>
+                  <Td>
+                    <span className="text-[12px] text-muted">{DIRECTION_LABEL[rule.direction] ?? rule.direction}</span>
+                  </Td>
                   <Td right>{rule.priority}</Td>
                   <Td>
                     <div className="flex items-center gap-3">

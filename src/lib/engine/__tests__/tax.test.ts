@@ -170,3 +170,61 @@ describe('categories added later', () => {
     expect(report.totalExpensesCents).toBe(0);
   });
 });
+
+describe('escrow inside a mortgage payment', () => {
+  const base = { year: 2026, propertyId: 'p1', transactions: [], mortgageInterestCents: 0 };
+
+  it('puts what the servicer disbursed on the taxes and insurance lines', () => {
+    const report = buildScheduleE({
+      ...base,
+      escrowPaidCents: cents(4_200),
+      escrowTaxCents: cents(2_400),
+      escrowInsuranceCents: cents(1_800),
+    });
+    const taxes = report.lines.find((l) => l.line === 'taxes');
+    const insurance = report.lines.find((l) => l.line === 'insurance');
+    expect(taxes?.amountCents).toBe(cents(2_400));
+    expect(insurance?.amountCents).toBe(cents(1_800));
+    expect(report.unallocatedEscrowCents).toBe(0);
+  });
+
+  it('deducts nothing and says so when the split is unknown', () => {
+    // Paying into escrow is not a deduction; guessing the split would put a
+    // made-up number on a tax return.
+    const report = buildScheduleE({ ...base, escrowPaidCents: cents(4_200) });
+    expect(report.lines.find((l) => l.line === 'taxes')?.amountCents ?? 0).toBe(0);
+    expect(report.unallocatedEscrowCents).toBe(cents(4_200));
+    expect(report.warnings.some((w) => w.includes('escrow'))).toBe(true);
+    expect(report.totalExpensesCents).toBe(0);
+  });
+
+  it('reports only the remainder when the split covers part of what went in', () => {
+    const report = buildScheduleE({
+      ...base,
+      escrowPaidCents: cents(4_200),
+      escrowTaxCents: cents(2_400),
+    });
+    expect(report.unallocatedEscrowCents).toBe(cents(1_800));
+  });
+
+  it('never reports negative escrow when disbursements exceed payments in', () => {
+    // A shortage the servicer covered, then billed for. Not a memo item.
+    const report = buildScheduleE({
+      ...base,
+      escrowPaidCents: cents(4_200),
+      escrowTaxCents: cents(3_000),
+      escrowInsuranceCents: cents(2_000),
+    });
+    expect(report.unallocatedEscrowCents).toBe(0);
+  });
+
+  it('keeps escrow out of the interest line', () => {
+    const report = buildScheduleE({
+      ...base,
+      mortgageInterestCents: cents(9_000),
+      escrowPaidCents: cents(4_200),
+      escrowTaxCents: cents(2_400),
+    });
+    expect(report.lines.find((l) => l.line === 'mortgage_interest')?.amountCents).toBe(cents(9_000));
+  });
+});

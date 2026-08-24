@@ -7,6 +7,7 @@ import {
   payoutTotals,
   planDistribution,
   type CapitalEntry,
+  reconcileDistributions,
 } from '../payouts';
 import { buildSchedule, periodInterest, paymentCountOf, type LoanTerms } from '../amortization';
 import { cents } from '../money';
@@ -213,5 +214,81 @@ describe('what has to go out this month', () => {
     ]);
     expect(due[0].paid).toBe(true);
     expect(payoutTotals(due, []).unpaidLendersCents).toBe(0);
+  });
+});
+
+describe('bank against books on owner distributions', () => {
+  const row = (over: Partial<Parameters<typeof reconcileDistributions>[0][number]> = {}) => ({
+    propertyId: 'p1',
+    propertyName: 'Raven',
+    movements: [],
+    recordedDistributionsCents: 0,
+    recordedContributionsCents: 0,
+    ...over,
+  });
+
+  it('ties when every transfer out has a distribution recorded against it', () => {
+    const [check] = reconcileDistributions([
+      row({
+        movements: [
+          { amountCents: cents(-2_000), categoryKey: 'owner_draw' },
+          { amountCents: cents(-2_000), categoryKey: 'owner_draw' },
+        ],
+        recordedDistributionsCents: cents(4_000),
+      }),
+    ]);
+    expect(check.bankDrawsCents).toBe(cents(4_000));
+    expect(check.drawDifferenceCents).toBe(0);
+    expect(check.status).toBe('tied');
+  });
+
+  it('flags a transfer that never got recorded', () => {
+    const [check] = reconcileDistributions([
+      row({
+        movements: [{ amountCents: cents(-3_500), categoryKey: 'owner_draw' }],
+        recordedDistributionsCents: cents(2_000),
+      }),
+    ]);
+    expect(check.drawDifferenceCents).toBe(cents(1_500));
+    expect(check.status).toBe('differs');
+  });
+
+  it('flags a distribution recorded twice against one transfer', () => {
+    const [check] = reconcileDistributions([
+      row({
+        movements: [{ amountCents: cents(-2_000), categoryKey: 'owner_draw' }],
+        recordedDistributionsCents: cents(4_000),
+      }),
+    ]);
+    expect(check.drawDifferenceCents).toBe(cents(-2_000));
+    expect(check.status).toBe('differs');
+  });
+
+  it('checks contributions on their own, not netted against draws', () => {
+    // Netting would let a $2,000 unrecorded draw hide behind a $2,000
+    // unrecorded contribution, and the capital position would still be wrong.
+    const [check] = reconcileDistributions([
+      row({
+        movements: [
+          { amountCents: cents(-2_000), categoryKey: 'owner_draw' },
+          { amountCents: cents(2_000), categoryKey: 'owner_contribution' },
+        ],
+      }),
+    ]);
+    expect(check.drawDifferenceCents).toBe(cents(2_000));
+    expect(check.contributionDifferenceCents).toBe(cents(2_000));
+    expect(check.status).toBe('differs');
+  });
+
+  it('says there is nothing to check when neither side moved', () => {
+    expect(reconcileDistributions([row()])[0].status).toBe('nothing_to_check');
+  });
+
+  it('ignores categories that are not owner movements', () => {
+    const [check] = reconcileDistributions([
+      row({ movements: [{ amountCents: cents(-800), categoryKey: 'electric' }] }),
+    ]);
+    expect(check.bankDrawsCents).toBe(0);
+    expect(check.status).toBe('nothing_to_check');
   });
 });

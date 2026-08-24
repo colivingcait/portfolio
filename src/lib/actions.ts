@@ -97,6 +97,11 @@ async function validate(modelKey: ModelKey, id: string | null, data: Record<stri
     }
   }
 
+  if (modelKey === 'payeeRule' && !data.direction) {
+    // The column is non-null with a default; an older form post must not null it.
+    data.direction = 'any';
+  }
+
   if (modelKey === 'entity' && data.isViewer === true) {
     // Exactly one entity is "me" — the node My share traverses from.
     await prisma.entity.updateMany({

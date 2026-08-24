@@ -87,6 +87,23 @@ export default async function ReportsPage({
         </Note>
       ) : null}
 
+      {data.rows.some((r) => r.scheduleE.unallocatedEscrowCents > 0) ? (
+        <Note>
+          Escrow went out inside a mortgage payment with no disbursement split on record, so it is on no line below.
+          Paying into escrow is not a deduction — what the servicer paid out for taxes and insurance is. Put the annual
+          amounts on the loan in{' '}
+          <Link href="/settings/loans" className="underline">Settings → Loans</Link>, taking them off the servicer's
+          year-end escrow analysis.
+          {data.rows
+            .filter((r) => r.scheduleE.unallocatedEscrowCents > 0)
+            .map((r) => (
+              <span key={r.propertyId} className="ml-2 whitespace-nowrap">
+                {r.propertyName}: <Money cents={r.scheduleE.unallocatedEscrowCents} />
+              </span>
+            ))}
+        </Note>
+      ) : null}
+
       {data.crossesEntities ? (
         <Note tone="muted">
           These properties are held by more than one entity, and each files separately. Use the entity filter above
