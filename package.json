@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "node scripts/check-db-url.mjs && prisma generate && prisma migrate deploy && next build",
+    "dev": "node scripts/copy-pdf-worker.mjs && next dev",
+    "build": "node scripts/copy-pdf-worker.mjs && node scripts/check-db-url.mjs && prisma generate && prisma migrate deploy && next build",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
@@ -14,12 +14,13 @@
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "check:db": "node scripts/check-db-url.mjs"
+    "check:db": "node scripts/check-db-url.mjs",
+    "prepare:worker": "node scripts/copy-pdf-worker.mjs"
   },
   "dependencies": {
     "@prisma/client": "6.19.0",
     "next": "^15.5.23",
-    "pdfjs-dist": "^6.2.108",
+    "pdfjs-dist": "^4.10.38",
     "react": "19.1.1",
     "react-dom": "19.1.1",
     "server-only": "^0.0.1"

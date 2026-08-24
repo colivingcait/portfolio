@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { postStatement, previewStatement, type StatementPreview } from '@/lib/import-actions';
+import { parsePdfInBrowser } from '@/lib/import/pdf-browser';
 import { formatCents } from '@/lib/engine/money';
 
 interface Props {
@@ -12,7 +13,7 @@ interface Props {
 interface Item {
   id: string;
   fileName: string;
-  payload: { csvText?: string; pdfBase64?: string };
+  payload: Parameters<typeof previewStatement>[0];
   state: 'reading' | 'checking' | 'ready' | 'posting' | 'posted' | 'failed';
   preview: StatementPreview | null;
   /** Set only where routing could not decide and a person has to. */
@@ -20,14 +21,51 @@ interface Item {
   message: string | null;
 }
 
-async function toPayload(file: File): Promise<{ csvText?: string; pdfBase64?: string }> {
+/**
+ * A PDF is read here, in the browser, and only its parsed rows are sent on.
+ * Shipping the file instead would run into the request-body ceiling on a
+ * serverless function — which base64 makes a third worse — so a large
+ * statement would simply never arrive.
+ */
+async function toPayload(file: File): Promise<Parameters<typeof previewStatement>[0]> {
   const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
   if (!isPdf) return { csvText: await file.text() };
 
   const buffer = new Uint8Array(await file.arrayBuffer());
-  let binary = '';
-  for (let i = 0; i < buffer.length; i += 8192) binary += String.fromCharCode(...buffer.subarray(i, i + 8192));
-  return { pdfBase64: btoa(binary) };
+
+  try {
+    // pdfjs transfers the buffer to its worker and leaves the original
+    // detached, so it gets a copy — otherwise the fallback below would encode
+    // an empty array and the server would see a file with nothing in it.
+    return { preparsed: await parsePdfInBrowser(buffer.slice()) };
+  } catch {
+    // Reading in the browser failed, so send the file and let the server try.
+    let binary = '';
+    for (let i = 0; i < buffer.length; i += 8192) binary += String.fromCharCode(...buffer.subarray(i, i + 8192));
+    return { pdfBase64: btoa(binary) };
+  }
+}
+
+/** Nothing may sit on "Reading…" indefinitely with no explanation. */
+async function withTimeout<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} took longer than ${Math.round(ms / 1000)} seconds and was given up on.`)), ms);
+  });
+  try {
+    return await Promise.race([work, timeout]);
+  } finally {
+    clearTimeout(timer!);
+  }
+}
+
+function messageFor(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error);
+  if (/body|413|payload|too large/i.test(text)) {
+    return 'That file was too large to send. It should have been read in the browser instead — tell Claude which file did this.';
+  }
+  if (/fetch|network|failed to fetch/i.test(text)) return 'Lost contact with the server part-way through. Try again.';
+  return text || 'Something went wrong reading that file.';
 }
 
 export function StatementDropzone({ accounts }: Props) {
@@ -44,16 +82,20 @@ export function StatementDropzone({ accounts }: Props) {
   const check = useCallback(
     async (item: Item, overrideAccountId: string | null) => {
       update(item.id, { state: 'checking', message: null });
-      const preview = await previewStatement({
-        ...item.payload,
-        fileName: item.fileName,
-        bankAccountId: overrideAccountId,
-      });
-      update(item.id, {
-        preview,
-        state: preview.ok ? 'ready' : 'failed',
-        message: preview.ok ? null : (preview.error ?? 'Could not read that file'),
-      });
+      try {
+        const preview = await withTimeout(
+          previewStatement({ ...item.payload, fileName: item.fileName, bankAccountId: overrideAccountId }),
+          60_000,
+          'Checking that statement',
+        );
+        update(item.id, {
+          preview,
+          state: preview.ok ? 'ready' : 'failed',
+          message: preview.ok ? null : (preview.error ?? 'Could not read that file'),
+        });
+      } catch (error) {
+        update(item.id, { state: 'failed', message: messageFor(error) });
+      }
     },
     [update],
   );
@@ -79,10 +121,14 @@ export function StatementDropzone({ accounts }: Props) {
       await Promise.all(
         Array.from(files).map(async (file, index) => {
           const item = incoming[index];
-          const payload = await toPayload(file);
-          item.payload = payload;
-          update(item.id, { payload });
-          await check({ ...item, payload }, null);
+          try {
+            const payload = await withTimeout(toPayload(file), 60_000, 'Reading that file');
+            item.payload = payload;
+            update(item.id, { payload });
+            await check({ ...item, payload }, null);
+          } catch (error) {
+            update(item.id, { state: 'failed', message: messageFor(error) });
+          }
         }),
       );
     },
@@ -94,11 +140,21 @@ export function StatementDropzone({ accounts }: Props) {
     startTransition(async () => {
       for (const item of ready) {
         update(item.id, { state: 'posting' });
-        const result = await postStatement({
-          ...item.payload,
-          fileName: item.fileName,
-          bankAccountId: item.preview?.match?.accountId ?? item.overrideAccountId,
-        });
+        let result;
+        try {
+          result = await withTimeout(
+            postStatement({
+              ...item.payload,
+              fileName: item.fileName,
+              bankAccountId: item.preview?.match?.accountId ?? item.overrideAccountId,
+            }),
+            120_000,
+            'Posting that statement',
+          );
+        } catch (error) {
+          update(item.id, { state: 'failed', message: messageFor(error) });
+          continue;
+        }
         update(item.id, {
           state: result.ok ? 'posted' : 'failed',
           message: result.ok

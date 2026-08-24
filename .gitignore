@@ -8,3 +8,4 @@ build/
 *.tsbuildinfo
 next-env.d.ts
 /prisma/generated
+/public/pdf.worker.min.mjs

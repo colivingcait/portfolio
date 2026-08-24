@@ -68,9 +68,24 @@ interface PreviewInput {
   /** Omit and the statement is routed by what it says about itself. */
   bankAccountId?: string | null;
   fileName?: string | null;
-  /** Exactly one of these. A CSV arrives as text, a PDF as base64. */
+  /**
+   * One of these. A CSV arrives as text; a PDF arrives already parsed by the
+   * browser, so the file itself never crosses the wire. pdfBase64 remains as a
+   * fallback for anything that could not be parsed client-side.
+   */
   csvText?: string;
   pdfBase64?: string;
+  preparsed?: {
+    transactions: { date: string; description: string; amountCents: number; runningBalanceCents: number | null }[];
+    skipped: { line: number; reason: string; raw: string }[];
+    openingBalanceCents: number | null;
+    closingBalanceCents: number | null;
+    signSource: SignSource;
+    sectionChecks: { section: string; statedCents: number; parsedCents: number; agrees: boolean }[];
+    periodStart: string | null;
+    periodEnd: string | null;
+    text: string;
+  };
   flipSign?: boolean;
   openingBalanceInput?: number | null;
   closingBalanceInput?: number | null;
@@ -92,6 +107,22 @@ type Parsed = ParsedStatement & {
  * uploaded.
  */
 async function parseUpload(input: PreviewInput): Promise<Parsed> {
+  if (input.preparsed) {
+    const p = input.preparsed;
+    return {
+      transactions: p.transactions,
+      skipped: p.skipped,
+      columns: { date: -1, description: -1, amount: -1, debit: -1, credit: -1, balance: -1 },
+      headers: [],
+      impliedOpeningBalanceCents: p.openingBalanceCents,
+      impliedClosingBalanceCents: p.closingBalanceCents,
+      signSource: p.signSource,
+      sectionChecks: p.sectionChecks,
+      periodStart: p.periodStart,
+      periodEnd: p.periodEnd,
+      text: p.text,
+    };
+  }
   if (input.pdfBase64) {
     return parsePdfStatement(Uint8Array.from(Buffer.from(input.pdfBase64, 'base64')), {
       flipSign: input.flipSign,
@@ -157,13 +188,24 @@ export async function previewStatement(input: PreviewInput): Promise<StatementPr
     accountLabel: null,
   };
 
-  const parsed = await parseUpload(input);
+  let parsed: Parsed;
+  try {
+    parsed = await parseUpload(input);
+  } catch (error) {
+    // A malformed file must come back as a sentence, not as an unhandled
+    // exception that the framework renders as a redacted server error.
+    return {
+      ...empty,
+      error: `That file could not be read: ${error instanceof Error ? error.message.replace(/\.$/, '') : 'unknown problem'}. If it is a scan rather than a text PDF there is nothing to extract, and the CSV export from the same account is the way in.`,
+    };
+  }
+
   if (parsed.transactions.length === 0) {
     return {
       ...empty,
       headers: parsed.headers,
       skipped: parsed.skipped,
-      error: input.pdfBase64
+      error: input.pdfBase64 || input.preparsed
         ? 'No transactions could be read out of that PDF. If it is a scan rather than a text PDF there is no text to extract, and the CSV or QFX export from the same account is the way in.'
         : parsed.headers.length === 0
           ? 'That file has no rows in it.'
@@ -277,7 +319,12 @@ export async function postStatement(input: PreviewInput & { fileName?: string })
     };
   }
 
-  const parsed = await parseUpload(input);
+  let parsed: Parsed;
+  try {
+    parsed = await parseUpload(input);
+  } catch (error) {
+    return { ok: false, error: `That file could not be read: ${error instanceof Error ? error.message.replace(/\.$/, '') : 'unknown problem'}.` };
+  }
   const rules = await rulesFor(accountId);
   const classified = classify(parsed.transactions, rules, accountId);
 

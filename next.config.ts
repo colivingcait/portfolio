@@ -13,6 +13,14 @@ const nextConfig: NextConfig = {
    * at runtime.
    */
   serverExternalPackages: ['pdfjs-dist'],
+  /**
+   * The server-side fallback loads pdfjs from node_modules at runtime, so its
+   * worker has to be traced into the deployed bundle or it is simply absent
+   * once deployed.
+   */
+  outputFileTracingIncludes: {
+    '/**': ['./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'],
+  },
 };
 
 export default nextConfig;
