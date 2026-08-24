@@ -6,6 +6,7 @@ import { fromIsoDate, requireIsoDate } from './mappers';
 import { recomputeMonths } from './rollups';
 import { parseStatement, type ParsedStatement } from './import/csv';
 import { parsePdfStatement } from './import/pdf';
+import { matchAccount, readHints, type AccountCandidate, type AccountMatch } from './import/detect';
 import {
   checkStatementBalance,
   classify,
@@ -19,6 +20,9 @@ import { monthOf } from './engine/dates';
 export interface StatementPreview {
   ok: boolean;
   error?: string;
+  /** Which account the file was routed to, and on what evidence. */
+  match?: AccountMatch;
+  accountLabel?: string | null;
   /** Echoed back so the client can post exactly what was previewed. */
   transactionCount: number;
   matchedCount: number;
@@ -33,7 +37,9 @@ export interface StatementPreview {
   impliedOpening: boolean;
   impliedClosing: boolean;
   /** PDFs only: how each amount's direction was decided. */
-  signSource?: 'running_balance' | 'column_position' | 'as_printed';
+  signSource?: SignSource;
+  /** Section totals the statement printed, against what was parsed from them. */
+  sectionChecks?: { section: string; statedCents: number; parsedCents: number; agrees: boolean }[];
   tie: {
     tied: boolean;
     creditsCents: number;
@@ -59,7 +65,9 @@ async function rulesFor(bankAccountId: string): Promise<PayeeRule[]> {
 }
 
 interface PreviewInput {
-  bankAccountId: string;
+  /** Omit and the statement is routed by what it says about itself. */
+  bankAccountId?: string | null;
+  fileName?: string | null;
   /** Exactly one of these. A CSV arrives as text, a PDF as base64. */
   csvText?: string;
   pdfBase64?: string;
@@ -68,7 +76,15 @@ interface PreviewInput {
   closingBalanceInput?: number | null;
 }
 
-type Parsed = ParsedStatement & { signSource?: 'running_balance' | 'column_position' | 'as_printed' };
+type SignSource = 'running_balance' | 'section_heading' | 'column_position' | 'as_printed';
+
+type Parsed = ParsedStatement & {
+  signSource?: SignSource;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  sectionChecks?: { section: string; statedCents: number; parsedCents: number; agrees: boolean }[];
+  text?: string;
+};
 
 /**
  * Both formats end up in the same shape, so everything downstream — payee
@@ -81,7 +97,36 @@ async function parseUpload(input: PreviewInput): Promise<Parsed> {
       flipSign: input.flipSign,
     });
   }
-  return parseStatement(input.csvText ?? '', { flipSign: input.flipSign });
+  const csv = input.csvText ?? '';
+  return { ...parseStatement(csv, { flipSign: input.flipSign }), text: csv };
+}
+
+/**
+ * Which account a file belongs to.
+ *
+ * A statement already says who it is for. Making someone pick it from a
+ * dropdown for every file is asking them to repeat what the document states,
+ * and to be right about it twelve times in a row.
+ */
+async function routeToAccount(parsed: Parsed, input: PreviewInput): Promise<AccountMatch> {
+  if (input.bankAccountId) {
+    return { accountId: input.bankAccountId, confidence: 'certain', reason: 'Chosen by hand.', alternatives: [] };
+  }
+
+  const accounts = await prisma.bankAccount.findMany({
+    where: { active: true },
+    include: { property: true },
+  });
+  const candidates: AccountCandidate[] = accounts.map((account) => ({
+    id: account.id,
+    label: `${account.property.name} · ${account.label}`,
+    propertyName: account.property.name,
+    propertyAddress: account.property.addressLine1,
+    institution: account.institution,
+    last4: account.last4,
+  }));
+
+  return matchAccount(readHints(parsed.text ?? '', input.fileName), candidates);
 }
 
 /**
@@ -108,6 +153,8 @@ export async function previewStatement(input: PreviewInput): Promise<StatementPr
     impliedClosing: false,
     tie: null,
     sample: [],
+    match: undefined,
+    accountLabel: null,
   };
 
   const parsed = await parseUpload(input);
@@ -124,9 +171,16 @@ export async function previewStatement(input: PreviewInput): Promise<StatementPr
     };
   }
 
-  const rules = await rulesFor(input.bankAccountId);
-  const classified = classify(parsed.transactions, rules, input.bankAccountId);
+  const match = await routeToAccount(parsed, input);
+  if (!match.accountId) {
+    return { ...empty, headers: parsed.headers, skipped: parsed.skipped, match, error: match.reason };
+  }
+
+  const rules = await rulesFor(match.accountId);
+  const classified = classify(parsed.transactions, rules, match.accountId);
   const dates = classified.map((t) => t.date).sort();
+  const periodStart = parsed.periodStart ?? dates[0] ?? null;
+  const periodEnd = parsed.periodEnd ?? dates[dates.length - 1] ?? null;
 
   const openingBalanceCents = input.openingBalanceInput ?? parsed.impliedOpeningBalanceCents;
   const closingBalanceCents = input.closingBalanceInput ?? parsed.impliedClosingBalanceCents;
@@ -140,6 +194,11 @@ export async function previewStatement(input: PreviewInput): Promise<StatementPr
         })
       : null;
 
+  const account = await prisma.bankAccount.findUnique({
+    where: { id: match.accountId },
+    include: { property: true },
+  });
+
   const known = new Set(
     [parsed.columns.date, parsed.columns.description, parsed.columns.amount, parsed.columns.debit, parsed.columns.credit, parsed.columns.balance].filter(
       (i) => i >= 0,
@@ -148,15 +207,18 @@ export async function previewStatement(input: PreviewInput): Promise<StatementPr
 
   return {
     ok: true,
+    match,
+    accountLabel: account ? `${account.property.name} · ${account.label}` : null,
     signSource: parsed.signSource,
+    sectionChecks: parsed.sectionChecks,
     transactionCount: classified.length,
     matchedCount: classified.filter((t) => t.categoryKey !== null).length,
     unmatchedCount: reviewList(classified).length,
     skipped: parsed.skipped,
     headers: parsed.headers,
     unrecognizedColumns: parsed.headers.filter((_, i) => !known.has(i)),
-    periodStart: dates[0] ?? null,
-    periodEnd: dates[dates.length - 1] ?? null,
+    periodStart,
+    periodEnd,
     openingBalanceCents,
     closingBalanceCents,
     impliedOpening: input.openingBalanceInput === null || input.openingBalanceInput === undefined,
@@ -186,6 +248,9 @@ export interface PostResult {
   statementId?: string;
   posted?: number;
   unmatched?: number;
+  accountLabel?: string | null;
+  /** False where the file carried no balances to check against. */
+  checked?: boolean;
 }
 
 /**
@@ -199,25 +264,24 @@ export async function postStatement(input: PreviewInput & { fileName?: string })
   const preview = await previewStatement(input);
   if (!preview.ok) return { ok: false, error: preview.error };
 
-  if (preview.openingBalanceCents === null || preview.closingBalanceCents === null) {
+  const accountId = preview.match?.accountId;
+  if (!accountId) return { ok: false, error: preview.match?.reason ?? 'Could not tell which account this belongs to.' };
+
+  // A statement that does not tie is refused, exactly as before. One that
+  // carries no balances at all is a different case: it is posted, but marked
+  // unchecked rather than passed off as reconciled.
+  if (preview.tie && !preview.tie.tied) {
     return {
       ok: false,
-      error:
-        'Enter the opening and closing balances from the statement. Without them the balance check cannot run, and the check is the reason this import can be trusted.',
-    };
-  }
-  if (!preview.tie?.tied) {
-    return {
-      ok: false,
-      error: `Refusing to post: opening + credits − debits comes to ${(preview.tie!.computedClosingCents / 100).toFixed(2)}, but the statement closes at ${(preview.tie!.statedClosingCents / 100).toFixed(2)} — a difference of ${(preview.tie!.differenceCents / 100).toFixed(2)}. The file is incomplete, the balances are wrong, or a row was misread.`,
+      error: `Refusing to post: opening + credits − debits comes to ${(preview.tie.computedClosingCents / 100).toFixed(2)}, but the statement closes at ${(preview.tie.statedClosingCents / 100).toFixed(2)} — a difference of ${(preview.tie.differenceCents / 100).toFixed(2)}. The file is incomplete, the balances are wrong, or a row was misread.`,
     };
   }
 
   const parsed = await parseUpload(input);
-  const rules = await rulesFor(input.bankAccountId);
-  const classified = classify(parsed.transactions, rules, input.bankAccountId);
+  const rules = await rulesFor(accountId);
+  const classified = classify(parsed.transactions, rules, accountId);
 
-  const account = await prisma.bankAccount.findUnique({ where: { id: input.bankAccountId } });
+  const account = await prisma.bankAccount.findUnique({ where: { id: accountId } });
   if (!account) return { ok: false, error: 'That account no longer exists.' };
 
   const periodStart = preview.periodStart!;
@@ -228,7 +292,7 @@ export async function postStatement(input: PreviewInput & { fileName?: string })
     const existing = await tx.bankStatement.findUnique({
       where: {
         bankAccountId_periodStart_periodEnd: {
-          bankAccountId: input.bankAccountId,
+          bankAccountId: accountId,
           periodStart: fromIsoDate(periodStart),
           periodEnd: fromIsoDate(periodEnd),
         },
@@ -238,13 +302,13 @@ export async function postStatement(input: PreviewInput & { fileName?: string })
 
     return tx.bankStatement.create({
       data: {
-        bankAccountId: input.bankAccountId,
+        bankAccountId: accountId,
         periodStart: fromIsoDate(periodStart),
         periodEnd: fromIsoDate(periodEnd),
-        openingBalanceCents: preview.openingBalanceCents!,
-        closingBalanceCents: preview.closingBalanceCents!,
-        computedClosingCents: preview.tie!.computedClosingCents,
-        status: 'posted',
+        openingBalanceCents: preview.openingBalanceCents ?? 0,
+        closingBalanceCents: preview.closingBalanceCents ?? 0,
+        computedClosingCents: preview.tie?.computedClosingCents ?? null,
+        status: preview.tie?.tied ? 'posted' : 'pending',
         fileName: input.fileName ?? null,
         transactions: {
           create: classified.map((t) => ({
@@ -269,6 +333,8 @@ export async function postStatement(input: PreviewInput & { fileName?: string })
     statementId: statement.id,
     posted: classified.length,
     unmatched: preview.unmatchedCount,
+    accountLabel: preview.accountLabel ?? null,
+    checked: Boolean(preview.tie?.tied),
   };
 }
 

@@ -11,6 +11,8 @@
  * without a PDF.
  */
 
+import type { IsoDate } from '../engine/dates';
+import type { Cents } from '../engine/money';
 import type { RawTransaction } from '../engine/bank';
 import { parseAmount, parseDate, type ParsedStatement } from './csv';
 
@@ -66,14 +68,19 @@ function amountsOn(line: PdfLine): { cents: number; x: number; raw: string }[] {
   return found;
 }
 
-function leadingDate(line: PdfLine): { date: string; rest: string } | null {
+function leadingDate(line: PdfLine, year?: number): { date: string; rest: string } | null {
   const text = line.text;
   const match = text.match(/^\s*(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?|\d{4}-\d{2}-\d{2}|[A-Za-z]{3}\s+\d{1,2},?\s*\d{0,4})/);
   if (!match) return null;
 
   let candidate = match[1];
   // A statement often omits the year on each row; the period supplies it.
-  if (/^\d{1,2}[/-]\d{1,2}$/.test(candidate)) candidate = `${candidate}/${new Date().getUTCFullYear()}`;
+  // A bare 07/01 takes its year from the statement period, never from today:
+  // importing a 2025 statement in 2026 would otherwise date every row wrong.
+  if (/^\d{1,2}[/-]\d{1,2}$/.test(candidate)) {
+    if (year === undefined) return null;
+    candidate = `${candidate}/${year}`;
+  }
 
   const date = parseDate(candidate);
   if (!date) return null;
@@ -81,7 +88,53 @@ function leadingDate(line: PdfLine): { date: string; rest: string } | null {
 }
 
 const OPENING_LABELS = /(beginning|opening|previous|starting)\s+balance/i;
-const CLOSING_LABELS = /(ending|closing|new|current)\s+balance/i;
+const CLOSING_LABELS = /(ending|closing|new)\s+balance/i;
+const TOTAL_LINE = /^total\s+(.+?)\s*\$?[\d,]+\.\d{2}$/i;
+
+/**
+ * Which way the amounts in a section run.
+ *
+ * Plenty of statements — Chase's among them — print every figure as a bare
+ * positive and convey direction by the heading it sits under. Reading the
+ * headings is the only way those come out right.
+ */
+export type SectionDirection = 'credit' | 'debit' | 'ignore' | null;
+
+export function directionOf(heading: string): SectionDirection {
+  const text = heading.toLowerCase();
+
+  // Recap blocks carry dates and amounts but no transactions. A daily ending
+  // balance table in particular reads exactly like rows of money moving, and
+  // importing it would double the statement.
+  if (/(summary|daily ending balance|balance summary|totals?$)/.test(text)) return 'ignore';
+
+  if (/(deposit|addition|credit)/.test(text)) return 'credit';
+  if (/(withdrawal|debit|check|fee|charge|payment)/.test(text)) return 'debit';
+  return null;
+}
+
+/** Returned by headingOf where a statement marks the end of a section. */
+export const END_OF_SECTION = '\u0000end';
+
+/** A heading is short, has no date and no money on it. */
+function headingOf(line: PdfLine): string | null {
+  const text = line.text.trim();
+
+  // Some statements mark their sections explicitly in the text layer.
+  const marker = text.match(/^\*start\*(.+)$/i);
+  if (marker) return marker[1];
+  if (/^\*end\*/i.test(text)) return END_OF_SECTION;
+
+  if (text.length > 60 || text.length < 4) return null;
+  if (/\d[\d,]*\.\d{2}/.test(text)) return null;
+  if (/^\d{1,2}[/-]\d{1,2}/.test(text)) return null;
+
+  const letters = text.replace(/[^A-Za-z]/g, '');
+  if (letters.length < 4) return null;
+  // Headings are set in capitals on every statement I have seen.
+  const upper = letters.replace(/[^A-Z]/g, '').length / letters.length;
+  return upper > 0.85 ? text : null;
+}
 
 export interface PdfStatementDraft {
   transactions: RawTransaction[];
@@ -89,8 +142,13 @@ export interface PdfStatementDraft {
   openingBalanceCents: number | null;
   closingBalanceCents: number | null;
   /** How each amount's direction was decided — shown to the user, not hidden. */
-  signSource: 'running_balance' | 'column_position' | 'as_printed';
+  signSource: 'running_balance' | 'section_heading' | 'column_position' | 'as_printed';
   lineCount: number;
+  /** A statement's own section totals, against what was parsed out of them. */
+  sectionChecks: { section: string; statedCents: Cents; parsedCents: Cents; agrees: boolean }[];
+  /** The period the statement covers, where it says so. */
+  periodStart: IsoDate | null;
+  periodEnd: IsoDate | null;
 }
 
 /**
@@ -102,69 +160,130 @@ export interface PdfStatementDraft {
  */
 export function rowsFromLines(lines: readonly PdfLine[], opts: { year?: number } = {}): PdfStatementDraft {
   const skipped: PdfStatementDraft['skipped'] = [];
-  const candidates: {
+  const summary: { opening: number | null; closing: number | null } = { opening: null, closing: null };
+  const sectionChecks: PdfStatementDraft['sectionChecks'] = [];
+
+  // The period tells us which year a bare 07/01 belongs to. Without it an old
+  // statement imported today would land its rows in the current year.
+  const period = findPeriodInLines(lines);
+  const year = opts.year ?? (period.start ? Number(period.start.slice(0, 4)) : undefined);
+
+  interface Candidate {
     date: string;
     description: string;
     amount: { cents: number; x: number };
     balance: number | null;
+    section: string;
+    direction: SectionDirection;
     lineNumber: number;
-  }[] = [];
+  }
 
-  // Held on an object rather than in two locals: assigning inside the loop
-  // below would otherwise narrow them to null for the code that follows.
-  const summary: { opening: number | null; closing: number | null } = { opening: null, closing: null };
+  const candidates: Candidate[] = [];
+  let section = '';
+  let direction: SectionDirection = null;
+  let previous: Candidate | null = null;
 
   lines.forEach((line, index) => {
+    const heading = headingOf(line);
+    if (heading === END_OF_SECTION) {
+      section = '';
+      direction = null;
+      previous = null;
+      return;
+    }
+    if (heading !== null) {
+      const headingDirection = directionOf(heading);
+      // A column header — DATE DESCRIPTION AMOUNT — is a heading by shape but
+      // says nothing about direction. Treating it as one would clear the
+      // section its own rows belong to.
+      if (headingDirection !== null) {
+        section = heading;
+        direction = headingDirection;
+      }
+      previous = null;
+      return;
+    }
+
     const amounts = amountsOn(line);
 
-    // Summary lines carry the figures the balance check needs.
     if (OPENING_LABELS.test(line.text) && amounts.length > 0) {
       summary.opening = amounts[amounts.length - 1].cents;
+      previous = null;
       return;
     }
     if (CLOSING_LABELS.test(line.text) && amounts.length > 0) {
       summary.closing = amounts[amounts.length - 1].cents;
+      previous = null;
       return;
     }
 
-    const dated = leadingDate(line);
-    if (!dated || amounts.length === 0) return;
+    if (direction === 'ignore') {
+      previous = null;
+      return;
+    }
 
-    let date = dated.date;
-    if (opts.year && /^\d{4}/.test(date)) date = `${opts.year}${date.slice(4)}`;
+    // "Total Electronic Withdrawals  $9,911.00" — a check on the section, not a row.
+    const total = line.text.match(TOTAL_LINE);
+    if (total && amounts.length > 0) {
+      sectionChecks.push({
+        section: total[1].trim(),
+        statedCents: Math.abs(amounts[amounts.length - 1].cents),
+        parsedCents: 0,
+        agrees: false,
+      });
+      previous = null;
+      return;
+    }
 
-    // Where a running balance is printed it is the rightmost figure.
-    const hasBalance = amounts.length >= 2;
-    const amount = hasBalance ? amounts[amounts.length - 2] : amounts[amounts.length - 1];
-    const balance = hasBalance ? amounts[amounts.length - 1].cents : null;
+    const dated = leadingDate(line, year);
+    if (!dated) {
+      // A description continued onto the next line — the ACH originator name
+      // usually lands here, and it is what a payee rule wants to match on.
+      if (previous && amounts.length === 0 && line.text.length > 3 && !/^page \d/i.test(line.text)) {
+        previous.description = `${previous.description} ${line.text}`.slice(0, 180).trim();
+      }
+      return;
+    }
+    if (amounts.length === 0) {
+      previous = null;
+      return;
+    }
+
+    const amount = amounts.length >= 2 ? amounts[amounts.length - 2] : amounts[amounts.length - 1];
+    const balance = amounts.length >= 2 ? amounts[amounts.length - 1].cents : null;
 
     const description = dated.rest
       .replace(new RegExp(amounts.map((a) => a.raw.replace(/[$()]/g, '\\$&')).join('|'), 'g'), '')
       .replace(/\s+/g, ' ')
       .trim();
 
-    candidates.push({
-      date,
+    const candidate: Candidate = {
+      date: dated.date,
       description: description || '(no description)',
       amount: { cents: amount.cents, x: amount.x },
       balance,
+      section,
+      direction,
       lineNumber: index + 1,
-    });
+    };
+    candidates.push(candidate);
+    previous = candidate;
   });
 
-  // Direction. A running balance settles it outright: the movement between one
-  // row and the next IS the amount, sign included. Nothing needs guessing.
-  const withBalances = candidates.filter((c) => c.balance !== null);
   let signSource: PdfStatementDraft['signSource'] = 'as_printed';
 
-  if (withBalances.length >= 2 && summary.opening !== null) {
+  // A genuine running-balance column shows up on most rows, not a handful.
+  const withBalances = candidates.filter((c) => c.balance !== null);
+  const hasBalanceColumn = candidates.length > 0 && withBalances.length / candidates.length >= 0.6;
+  const sectioned = candidates.filter((c) => c.direction === 'credit' || c.direction === 'debit');
+  const hasSections = candidates.length > 0 && sectioned.length / candidates.length >= 0.6;
+
+  if (hasBalanceColumn && summary.opening !== null) {
     signSource = 'running_balance';
-    let previous: number = summary.opening;
+    let running: number = summary.opening;
     for (const candidate of candidates) {
       if (candidate.balance === null) continue;
-      const delta = candidate.balance - previous;
-      // Trust the delta only where it agrees in magnitude with the figure
-      // printed on the row; otherwise the row is something else entirely.
+      const delta = candidate.balance - running;
       if (Math.abs(Math.abs(delta) - Math.abs(candidate.amount.cents)) <= 1) {
         candidate.amount.cents = delta;
       } else {
@@ -174,16 +293,20 @@ export function rowsFromLines(lines: readonly PdfLine[], opts: { year?: number }
           raw: `${candidate.date} ${candidate.description}`,
         });
       }
-      previous = candidate.balance;
+      running = candidate.balance;
+    }
+  } else if (hasSections) {
+    // Direction from the heading each row sits under.
+    signSource = 'section_heading';
+    for (const candidate of candidates) {
+      const magnitude = Math.abs(candidate.amount.cents);
+      candidate.amount.cents = candidate.direction === 'debit' ? -magnitude : magnitude;
     }
   } else if (candidates.length > 0) {
-    // No running balance: fall back to which column the figure sits in.
-    // US statements conventionally print withdrawals left of deposits.
     const xs = [...new Set(candidates.map((c) => Math.round(c.amount.x)))].sort((a, b) => a - b);
     if (xs.length >= 2) {
       const split = (xs[0] + xs[xs.length - 1]) / 2;
-      const spread = xs[xs.length - 1] - xs[0];
-      if (spread > 20) {
+      if (xs[xs.length - 1] - xs[0] > 20) {
         signSource = 'column_position';
         for (const candidate of candidates) {
           candidate.amount.cents =
@@ -194,22 +317,46 @@ export function rowsFromLines(lines: readonly PdfLine[], opts: { year?: number }
   }
 
   const failed = new Set(skipped.map((s) => s.line));
+  const kept = candidates.filter((c) => !failed.has(c.lineNumber));
+
+  // Tally each section against the total the statement printed for it.
+  for (const check of sectionChecks) {
+    const rows = kept.filter((c) => c.section.toLowerCase().includes(check.section.toLowerCase().split(' ')[0]));
+    check.parsedCents = Math.abs(rows.reduce((sum, r) => sum + r.amount.cents, 0));
+    check.agrees = Math.abs(check.parsedCents - check.statedCents) <= 1;
+  }
 
   return {
-    transactions: candidates
-      .filter((c) => !failed.has(c.lineNumber))
-      .map((c) => ({
-        date: c.date,
-        description: c.description,
-        amountCents: c.amount.cents,
-        runningBalanceCents: c.balance,
-      })),
+    transactions: kept.map((c) => ({
+      date: c.date,
+      description: c.description,
+      amountCents: c.amount.cents,
+      runningBalanceCents: c.balance,
+    })),
     skipped,
     openingBalanceCents: summary.opening,
     closingBalanceCents: summary.closing,
     signSource,
     lineCount: lines.length,
+    sectionChecks,
+    periodStart: period.start,
+    periodEnd: period.end,
   };
+}
+
+/** The statement period, from whichever line prints it. */
+function findPeriodInLines(lines: readonly PdfLine[]): { start: IsoDate | null; end: IsoDate | null } {
+  const dateLike = '(\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4}|\\d{4}-\\d{2}-\\d{2}|[A-Za-z]{3,9}\\s+\\d{1,2},?\\s*\\d{4})';
+  const pattern = new RegExp(`${dateLike}\\s*(?:-|–|—|to|through)\\s*${dateLike}`, 'i');
+
+  for (const line of lines.slice(0, 40)) {
+    const match = line.text.match(pattern);
+    if (!match) continue;
+    const start = parseDate(match[1]);
+    const end = parseDate(match[2]);
+    if (start && end && start <= end) return { start, end };
+  }
+  return { start: null, end: null };
 }
 
 /** Pull positioned text out of a PDF, page by page. */
@@ -241,11 +388,23 @@ export async function extractLines(data: Uint8Array): Promise<PdfLine[]> {
 export async function parsePdfStatement(
   data: Uint8Array,
   options: { flipSign?: boolean; year?: number } = {},
-): Promise<ParsedStatement & { signSource: PdfStatementDraft['signSource'] }> {
+): Promise<
+  ParsedStatement & {
+    signSource: PdfStatementDraft['signSource'];
+    periodStart: IsoDate | null;
+    periodEnd: IsoDate | null;
+    sectionChecks: PdfStatementDraft['sectionChecks'];
+    text: string;
+  }
+> {
   const lines = await extractLines(data);
   const draft = rowsFromLines(lines, { year: options.year });
 
   return {
+    text: lines.map((line) => line.text).join('\n'),
+    periodStart: draft.periodStart,
+    periodEnd: draft.periodEnd,
+    sectionChecks: draft.sectionChecks,
     transactions: options.flipSign
       ? draft.transactions.map((t) => ({ ...t, amountCents: -t.amountCents }))
       : draft.transactions,

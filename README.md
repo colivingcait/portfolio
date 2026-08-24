@@ -35,9 +35,17 @@ effective-share traversal and the maturity ladder working. Useful the day it shi
   100% before it is saved rather than after.
 - **Imports / Review** — the screens exist and say plainly what they are waiting on.
 
-**Build order step 2 (§13.2) — bank statement import.** Pick a property's account, drop its CSV or PDF,
+**Build order step 2 (§13.2) — bank statement import.** Drop CSVs or PDFs in, as many at once as
+you like, and nothing has to be filled in: each file is read for the account it belongs to, the
+period it covers and the balances to check against. A statement already states all three, and
+re-typing them is where errors come from. Routing is by the account number in the statement
+header, falling back to the property address or name in the body; a linked account mentioned
+elsewhere in the document is deliberately weak evidence, since routing on it would file a
+statement against the wrong property.
+
+Once routed,
 and every row belongs to it: one account per property means the file answers "which property"
-by itself. Payee rules classify what they recognise, the rest goes to Review, and confirming a
+by itself. payee rules classify what they recognise, the rest goes to Review, and confirming a
 row there writes the rule for every future import. Nothing posts unless
 `opening + credits − debits = closing`.
 

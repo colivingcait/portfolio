@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/db';
 import { Badge, Empty, Money, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
-import { StatementUploader } from '@/components/StatementUploader';
+import { StatementDropzone } from '@/components/StatementDropzone';
 import { DeleteStatementButton } from '@/components/DeleteStatementButton';
 
 export const dynamic = 'force-dynamic';
@@ -26,7 +26,7 @@ export default async function ImportsPage() {
     <>
       <PageHeader
         title="Imports"
-        subtitle="One account per property means the file is the property. Pick the account, drop its statement, and every row belongs to it — the only question left is what kind."
+        subtitle="Drop statements in. Each one is read for the account it belongs to, the period it covers and the balances to check against. One account per property means the file is the property, so every row in it belongs there — the only question left is what kind."
       />
 
       {options.length === 0 ? (
@@ -36,10 +36,10 @@ export default async function ImportsPage() {
         </Note>
       ) : (
         <Panel
-          title="Bank statement"
+          title="Bank statements"
           description="Nothing posts unless opening + credits − debits equals the closing balance. A statement that does not tie is refused rather than half-imported."
         >
-          <StatementUploader accounts={options} />
+          <StatementDropzone accounts={options} />
         </Panel>
       )}
 
