@@ -30,6 +30,13 @@ export interface Field {
   placeholder?: string;
   /** Layout hint: how many of the 12 columns this field takes. */
   span?: number;
+  /**
+   * Pre-filled when creating a new record. For a required choice with one
+   * obvious answer — a loan being active, a payment being one that actually
+   * happened — an empty dropdown is a validation error waiting to happen and
+   * teaches the user nothing.
+   */
+  defaultValue?: string | boolean;
 }
 
 export class FieldError extends Error {
@@ -88,7 +95,9 @@ export function parseForm(fields: readonly Field[], data: FormData): Record<stri
         break;
       case 'number':
       case 'percent': {
-        const n = Number(value);
+        // Typing "10.5%" or "1,200" is the obvious thing to do in a field
+        // labelled Rate % or Term, so accept both rather than rejecting them.
+        const n = Number(value.replace(/[%,\s]/g, ''));
         if (Number.isNaN(n)) throw new FieldError(field.name, `${field.label} is not a number`);
         out[field.name] = n;
         break;

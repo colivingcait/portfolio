@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { saveRecord } from '@/lib/actions';
 import type { ModelKey } from '@/lib/models';
@@ -27,19 +27,78 @@ const SPAN: Record<number, string> = {
   12: 'col-span-12',
 };
 
+type Values = Record<string, string | boolean>;
+
+function initialValues(
+  fields: Field[],
+  initial: Record<string, string | boolean | null>,
+  useDefaults: boolean,
+): Values {
+  const values: Values = {};
+  for (const field of fields) {
+    const value = initial[field.name];
+    const fallback = useDefaults ? field.defaultValue : undefined;
+
+    if (field.type === 'checkbox') {
+      values[field.name] = value === true || (value === undefined && fallback === true);
+    } else if (typeof value === 'string' && value !== '') {
+      values[field.name] = value;
+    } else {
+      values[field.name] = typeof fallback === 'string' ? fallback : '';
+    }
+  }
+  return values;
+}
+
 export function RecordForm({ modelKey, fields, id = null, initial = {}, submitLabel, onSaved }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [values, setValues] = useState<Values>(() => initialValues(fields, initial, id === null));
   const [error, setError] = useState<{ message: string; field?: string } | null>(null);
+  const [saved, setSaved] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  function onSubmit(formData: FormData) {
+  // The fields are controlled rather than left to the DOM. A form with an
+  // action resets itself once the action returns — including when it returned
+  // an error — which would throw away everything typed over one bad field.
+  useEffect(() => {
+    if (!error?.field) return;
+    const element = containerRef.current?.querySelector<HTMLElement>(`[name="${error.field}"]`);
+    element?.focus();
+    element?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [error]);
+
+  function set(name: string, value: string | boolean) {
+    setValues((current) => ({ ...current, [name]: value }));
+    setSaved(false);
+    // Clear the error on the field being corrected, but keep the message for
+    // any other field so the summary does not flicker away mid-edit.
+    setError((current) => (current?.field === name ? null : current));
+  }
+
+  function submit() {
     setError(null);
+    setSaved(false);
+
+    const formData = new FormData();
+    for (const field of fields) {
+      const value = values[field.name];
+      if (field.type === 'checkbox') {
+        if (value === true) formData.set(field.name, 'on');
+      } else {
+        formData.set(field.name, String(value ?? ''));
+      }
+    }
+
     startTransition(async () => {
       const result = await saveRecord(modelKey, id, formData);
       if (result.ok) {
+        setSaved(true);
         router.refresh();
         onSaved?.();
-        if (!id) (document.getElementById(`form-${modelKey}`) as HTMLFormElement | null)?.reset();
+        // Clear only after a successful create, so the next record starts
+        // fresh. An edit keeps what is on screen, since that is now the truth.
+        if (!id) setValues(initialValues(fields, {}, true));
       } else {
         setError({ message: result.error ?? 'Could not save', field: result.field });
       }
@@ -47,10 +106,11 @@ export function RecordForm({ modelKey, fields, id = null, initial = {}, submitLa
   }
 
   return (
-    <form id={`form-${modelKey}`} action={onSubmit} className="grid grid-cols-12 gap-3">
+    <div ref={containerRef} className="grid grid-cols-12 gap-3">
       {fields.map((field) => {
-        const value = initial[field.name];
+        const value = values[field.name];
         const invalid = error?.field === field.name;
+
         return (
           <div key={field.name} className={SPAN[field.span ?? 4] ?? SPAN[4]}>
             <label className="mb-1 block text-[11px] uppercase tracking-wide text-muted" htmlFor={field.name}>
@@ -62,12 +122,15 @@ export function RecordForm({ modelKey, fields, id = null, initial = {}, submitLa
               <select
                 id={field.name}
                 name={field.name}
-                defaultValue={typeof value === 'string' ? value : ''}
+                value={typeof value === 'string' ? value : ''}
+                onChange={(e) => set(field.name, e.target.value)}
                 className={invalid ? 'border-bad!' : undefined}
               >
                 {!field.required || field.emptyLabel ? (
                   <option value="">{field.emptyLabel ?? '—'}</option>
-                ) : null}
+                ) : (
+                  <option value="">—</option>
+                )}
                 {(field.options ?? []).map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
@@ -79,39 +142,58 @@ export function RecordForm({ modelKey, fields, id = null, initial = {}, submitLa
                 id={field.name}
                 name={field.name}
                 rows={2}
-                defaultValue={typeof value === 'string' ? value : ''}
+                value={typeof value === 'string' ? value : ''}
+                onChange={(e) => set(field.name, e.target.value)}
               />
             ) : field.type === 'checkbox' ? (
               <div className="pt-1.5">
-                <input id={field.name} name={field.name} type="checkbox" defaultChecked={value === true} />
+                <input
+                  id={field.name}
+                  name={field.name}
+                  type="checkbox"
+                  checked={value === true}
+                  onChange={(e) => set(field.name, e.target.checked)}
+                />
               </div>
             ) : (
               <input
                 id={field.name}
                 name={field.name}
                 type={field.type === 'date' ? 'date' : 'text'}
-                inputMode={field.type === 'money' || field.type === 'number' || field.type === 'percent' ? 'decimal' : undefined}
+                inputMode={
+                  field.type === 'money' || field.type === 'number' || field.type === 'percent' ? 'decimal' : undefined
+                }
                 placeholder={field.placeholder}
-                defaultValue={typeof value === 'string' ? value : ''}
+                value={typeof value === 'string' ? value : ''}
+                onChange={(e) => set(field.name, e.target.value)}
                 className={invalid ? 'border-bad!' : undefined}
               />
             )}
 
-            {field.help ? <p className="mt-1 text-[11px] leading-snug text-muted">{field.help}</p> : null}
+            {invalid ? (
+              <p className="mt-1 text-[11px] leading-snug text-bad">{error.message}</p>
+            ) : field.help ? (
+              <p className="mt-1 text-[11px] leading-snug text-muted">{field.help}</p>
+            ) : null}
           </div>
         );
       })}
 
       <div className="col-span-12 flex items-center gap-3 pt-1">
         <button
-          type="submit"
+          type="button"
+          onClick={submit}
           disabled={pending}
           className="rounded-md border border-line bg-surface-2 px-3 py-1.5 text-[13px] hover:border-accent disabled:opacity-50"
         >
           {pending ? 'Saving…' : (submitLabel ?? (id ? 'Save' : 'Add'))}
         </button>
-        {error ? <span className="text-[12px] text-bad">{error.message}</span> : null}
+
+        {/* A field-level error is shown under its field; anything else here. */}
+        {error && !error.field ? <span className="text-[12px] text-bad">{error.message}</span> : null}
+        {error?.field ? <span className="text-[12px] text-bad">Check the highlighted field.</span> : null}
+        {saved ? <span className="text-[12px] text-good">Saved.</span> : null}
       </div>
-    </form>
+    </div>
   );
 }
