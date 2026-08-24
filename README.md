@@ -25,11 +25,18 @@ effective-share traversal and the maturity ladder working. Useful the day it shi
   100% before it is saved rather than after.
 - **Imports / Review** — the screens exist and say plainly what they are waiting on.
 
-**Build order step 2 (§13.2) — bank statement import.** Pick a property's account, drop its CSV,
+**Build order step 2 (§13.2) — bank statement import.** Pick a property's account, drop its CSV or PDF,
 and every row belongs to it: one account per property means the file answers "which property"
 by itself. Payee rules classify what they recognise, the rest goes to Review, and confirming a
 row there writes the rule for every future import. Nothing posts unless
 `opening + credits − debits = closing`.
+
+PDF statements are reconstructed from positioned text, which is heuristic — but nothing
+downstream trusts the result, because the balance check does not: a misread PDF fails to tie
+and is refused exactly like a truncated CSV. Where the statement prints a running balance,
+each amount's direction comes from how that balance moved, so figures printed without minus
+signs are still read correctly. Scanned PDFs have no text to extract and are not supported;
+the CSV or QFX export from the same account is the way in.
 
 ## What is not built
 

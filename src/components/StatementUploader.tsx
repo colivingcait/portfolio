@@ -14,7 +14,7 @@ export function StatementUploader({ accounts }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [accountId, setAccountId] = useState(accounts[0]?.value ?? '');
-  const [csvText, setCsvText] = useState<string | null>(null);
+  const [upload, setUpload] = useState<{ csvText?: string; pdfBase64?: string } | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [flipSign, setFlipSign] = useState(false);
   const [opening, setOpening] = useState('');
@@ -31,22 +31,33 @@ export function StatementUploader({ accounts }: Props) {
     setPreview(null);
     setMessage(null);
     if (!file) {
-      setCsvText(null);
+      setUpload(null);
       setFileName(null);
       return;
     }
-    const text = await file.text();
-    setCsvText(text);
+
+    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+    if (isPdf) {
+      // Sent as base64 because a server action takes JSON, not a file body.
+      const buffer = new Uint8Array(await file.arrayBuffer());
+      let binary = '';
+      for (let i = 0; i < buffer.length; i += 8192) {
+        binary += String.fromCharCode(...buffer.subarray(i, i + 8192));
+      }
+      setUpload({ pdfBase64: btoa(binary) });
+    } else {
+      setUpload({ csvText: await file.text() });
+    }
     setFileName(file.name);
   }
 
   function runPreview(nextFlip = flipSign) {
-    if (!csvText || !accountId) return;
+    if (!upload || !accountId) return;
     setMessage(null);
     startTransition(async () => {
       const result = await previewStatement({
         bankAccountId: accountId,
-        csvText,
+        ...upload,
         flipSign: nextFlip,
         ...balanceInputs(),
       });
@@ -63,11 +74,11 @@ export function StatementUploader({ accounts }: Props) {
   }
 
   function post() {
-    if (!csvText || !accountId) return;
+    if (!upload || !accountId) return;
     startTransition(async () => {
       const result = await postStatement({
         bankAccountId: accountId,
-        csvText,
+        ...upload,
         flipSign,
         fileName: fileName ?? undefined,
         ...balanceInputs(),
@@ -78,7 +89,7 @@ export function StatementUploader({ accounts }: Props) {
           text: `Posted ${result.posted} transactions.${result.unmatched ? ` ${result.unmatched} need a category — they are in Review.` : ' Everything matched a payee rule.'}`,
         });
         setPreview(null);
-        setCsvText(null);
+        setUpload(null);
         setFileName(null);
         setOpening('');
         setClosing('');
@@ -110,8 +121,15 @@ export function StatementUploader({ accounts }: Props) {
         </div>
 
         <div className="col-span-12 sm:col-span-4">
-          <label className="mb-1 block text-[11px] uppercase tracking-wide text-muted">Statement CSV</label>
-          <input type="file" accept=".csv,text/csv" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
+          <label className="mb-1 block text-[11px] uppercase tracking-wide text-muted">Statement file</label>
+          <input
+            type="file"
+            accept=".csv,text/csv,.pdf,application/pdf"
+            onChange={(e) => onFile(e.target.files?.[0] ?? null)}
+          />
+          <p className="mt-1 text-[11px] leading-snug text-muted">
+            CSV or PDF. A CSV is the more reliable of the two — if the bank offers one, prefer it.
+          </p>
           {fileName ? <p className="mt-1 text-[11px] text-muted">{fileName}</p> : null}
         </div>
 
@@ -142,7 +160,7 @@ export function StatementUploader({ accounts }: Props) {
         <div className="col-span-12 sm:col-span-6 flex items-end gap-2">
           <button
             type="button"
-            disabled={!csvText || pending}
+            disabled={!upload || pending}
             onClick={() => runPreview()}
             className="rounded-md border border-line bg-surface-2 px-3 py-1.5 text-[13px] hover:border-accent disabled:opacity-40"
           >
@@ -201,6 +219,16 @@ export function StatementUploader({ accounts }: Props) {
               trustworthy, so nothing posts without it.
             </div>
           )}
+
+          {preview.signSource ? (
+            <p className="mt-3 text-[11px] leading-snug text-muted">
+              {preview.signSource === 'running_balance'
+                ? 'Read from a PDF. Each amount’s direction came from how the running balance moved, so a figure printed without a minus sign is still recognised as money going out.'
+                : preview.signSource === 'column_position'
+                  ? 'Read from a PDF with no running balance, so direction was taken from which column each figure sits in — withdrawals left, deposits right. Check a couple of rows below, and use “Amounts are reversed” if it has them backwards.'
+                  : 'Read from a PDF. Amounts were taken exactly as printed, including their signs.'}
+            </p>
+          ) : null}
 
           {preview.skipped.length > 0 ? (
             <div className="mt-3 rounded-md border border-warn/30 bg-warn/5 px-3 py-2 text-[12px] text-warn">

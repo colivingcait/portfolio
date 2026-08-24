@@ -4,7 +4,8 @@ import { revalidatePath } from 'next/cache';
 import { prisma } from './db';
 import { fromIsoDate, requireIsoDate } from './mappers';
 import { recomputeMonths } from './rollups';
-import { parseStatement } from './import/csv';
+import { parseStatement, type ParsedStatement } from './import/csv';
+import { parsePdfStatement } from './import/pdf';
 import {
   checkStatementBalance,
   classify,
@@ -31,6 +32,8 @@ export interface StatementPreview {
   closingBalanceCents: number | null;
   impliedOpening: boolean;
   impliedClosing: boolean;
+  /** PDFs only: how each amount's direction was decided. */
+  signSource?: 'running_balance' | 'column_position' | 'as_printed';
   tie: {
     tied: boolean;
     creditsCents: number;
@@ -57,10 +60,28 @@ async function rulesFor(bankAccountId: string): Promise<PayeeRule[]> {
 
 interface PreviewInput {
   bankAccountId: string;
-  csvText: string;
+  /** Exactly one of these. A CSV arrives as text, a PDF as base64. */
+  csvText?: string;
+  pdfBase64?: string;
   flipSign?: boolean;
   openingBalanceInput?: number | null;
   closingBalanceInput?: number | null;
+}
+
+type Parsed = ParsedStatement & { signSource?: 'running_balance' | 'column_position' | 'as_printed' };
+
+/**
+ * Both formats end up in the same shape, so everything downstream — payee
+ * rules, the balance check, the review list — is identical whichever was
+ * uploaded.
+ */
+async function parseUpload(input: PreviewInput): Promise<Parsed> {
+  if (input.pdfBase64) {
+    return parsePdfStatement(Uint8Array.from(Buffer.from(input.pdfBase64, 'base64')), {
+      flipSign: input.flipSign,
+    });
+  }
+  return parseStatement(input.csvText ?? '', { flipSign: input.flipSign });
 }
 
 /**
@@ -89,14 +110,15 @@ export async function previewStatement(input: PreviewInput): Promise<StatementPr
     sample: [],
   };
 
-  const parsed = parseStatement(input.csvText, { flipSign: input.flipSign });
+  const parsed = await parseUpload(input);
   if (parsed.transactions.length === 0) {
     return {
       ...empty,
       headers: parsed.headers,
       skipped: parsed.skipped,
-      error:
-        parsed.headers.length === 0
+      error: input.pdfBase64
+        ? 'No transactions could be read out of that PDF. If it is a scan rather than a text PDF there is no text to extract, and the CSV or QFX export from the same account is the way in.'
+        : parsed.headers.length === 0
           ? 'That file has no rows in it.'
           : `No readable transactions. Columns found: ${parsed.headers.join(', ') || '(none)'}. A date column and either an amount column or a debit/credit pair are needed.`,
     };
@@ -126,6 +148,7 @@ export async function previewStatement(input: PreviewInput): Promise<StatementPr
 
   return {
     ok: true,
+    signSource: parsed.signSource,
     transactionCount: classified.length,
     matchedCount: classified.filter((t) => t.categoryKey !== null).length,
     unmatchedCount: reviewList(classified).length,
@@ -190,7 +213,7 @@ export async function postStatement(input: PreviewInput & { fileName?: string })
     };
   }
 
-  const parsed = parseStatement(input.csvText, { flipSign: input.flipSign });
+  const parsed = await parseUpload(input);
   const rules = await rulesFor(input.bankAccountId);
   const classified = classify(parsed.transactions, rules, input.bankAccountId);
 
