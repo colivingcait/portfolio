@@ -71,10 +71,16 @@ npm run dev
 
 ### Deploying to Vercel
 
-Set four environment variables on the project: `DATABASE_URL` (Supabase pooled, port 6543),
+Set three environment variables on the project: `DATABASE_URL` (Supabase pooled, port 6543),
 `DIRECT_URL` (direct, port 5432), and `ALLOWED_EMAIL`. The Supabase Vercel integration injects
-its own `POSTGRES_*` names — these two are read by `prisma/schema.prisma` and must be set
+its own `POSTGRES_*` names — the first two are read by `prisma/schema.prisma` and must be set
 explicitly whatever else is present.
+
+Paste the connection strings **bare**: no surrounding quotes, no `DATABASE_URL=` prefix.
+Vercel stores the value verbatim, so a copied-in quote makes the scheme `"postgresql` and the
+build fails with `P1013: The provided database string is invalid`. `DIRECT_URL` is the one
+`prisma migrate deploy` reads, so a bad value there fails the build even when the app itself
+would have run.
 
 **Auth is not wired to Supabase sessions yet.** Until it is, a deployed URL is readable by
 anyone who has it. Keep Vercel's deployment protection on, or keep it local, until real
