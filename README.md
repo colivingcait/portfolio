@@ -1,0 +1,94 @@
+# Portfolio
+
+A single-user internal tool that replaces the monthly spreadsheet. Not a SaaS: one user,
+no customers, no billing, no team roles, no onboarding. Built from `portfoliobuildspec.pdf`
+(v5, 24 August 2026); section references below (§) point back at it.
+
+## What is built
+
+**Build order step 1 (§13.1) and the engine underneath it.** Entities, ownership interests,
+properties, accounts, management periods, loans and leases — all manual entry, with the
+effective-share traversal and the maturity ladder working. Useful the day it ships.
+
+- **Portfolio** — one row per property, with management mode for the selected month,
+  effective share, debt service and debt balance. View selector (Portfolio / My share /
+  Entity), entity filter, month selector.
+- **Debt** — the maturity ladder, per-loan detail, full amortization schedules, guaranteed
+  exposure held separate from the pro-rata share.
+- **Property detail** — ownership paths, management history with boundary warnings, loans,
+  leases.
+- **Settings** — every step-1 record type, plus payee rules, capital accounts and the
+  category vocabulary.
+- **Imports / Review** — the screens exist and say plainly what they are waiting on.
+
+## What is not built
+
+Steps 2 through 7 of §13, in that order: bank statement import, backfill, PadSplit import,
+PM reconciliation in reduced form, the PM statement importer (blocked on a real sample),
+and projections (not before October, and not because of the code — §13).
+
+The reconciliation rules those steps need are already written and unit-tested in
+`src/lib/engine`. What is missing around them is upload, parsing and persistence.
+
+## Architecture
+
+```
+src/lib/engine/     pure functions — no Prisma, no Next, no I/O
+src/lib/            mappers, queries, server actions: the layer that touches the database
+src/app/            screens
+prisma/schema.prisma  the §11 data model
+```
+
+The engine is kept dependency-free deliberately (§12, "Keep"): every identity in the spec is
+expressed once, there, and unit-tested without a database. `npm test` runs 97 tests covering
+the effective-share traversal, amortization, the PadSplit rules that must not drift, the
+management-period identities, the bank balance tie and the pro-rate/do-not-pro-rate split.
+
+Money is integer cents everywhere. Dates are ISO strings (`YYYY-MM-DD`, `YYYY-MM`), never
+`Date` objects, because every date here is a calendar date and a timestamp read back in
+another zone silently becomes the previous day.
+
+## Stack
+
+Next.js App Router · TypeScript · Tailwind · Supabase (Postgres, Auth, Storage) · Prisma
+**pinned to 6.19** — Prisma 7 breaks the pooled/direct URL pattern in favour of driver
+adapters · Vercel · roomreport.co.
+
+Dropped from the previous plan: Plaid (bank data arrives as uploaded statements), roles, RLS,
+bookkeeper flows and self-serve onboarding.
+
+## Running it
+
+```bash
+cp .env.example .env      # fill in the Supabase URLs and your allowlisted email
+npm install
+npx prisma migrate deploy # or `npx prisma db push` against a scratch database
+npm run dev
+```
+
+`npm test` needs no database. `npm run build` runs `prisma generate` first.
+
+## Things the data cannot tell you yet
+
+These are open items from §14 that block or distort what the app can show. They are the
+reason nothing seeds itself:
+
+- **The property table is unverified.** Addresses, room counts and statuses were carried from
+  an earlier build document. Properties carry a `dataVerified` flag, default false, and every
+  screen says so until it is set. The coliving rows sum to 45 rooms — confirm before any
+  count is displayed.
+- **The trailing-twelve PadSplit figures are unverified** ($214,883 gross / $31,731 fees /
+  $4,271 credits / $187,423 payout / 91.8% collection) and the range includes August, which
+  the in-flight rule says to drop. Re-run over Sep 2025 – Jul 2026 against a fresh export.
+- **Ownership percentages are unknown** — what each partner holds in each Lustra property, and
+  in Lustra House itself. Until they are entered, "My share" has nothing to multiply by.
+- **Whether distributions follow equity** or split differently under the operating agreement.
+  The schema carries an optional distribution percentage that overrides equity for cash.
+- **Guarantor flags** — which notes are personally guaranteed. The ladder shows exposure only
+  where the flag is set.
+- **The PM statement format** and the **deposit-to-earnings-month lag**. Both need one real
+  sample; neither is hard-coded anywhere yet.
+- **The duplex details** — address, loan terms, rent per unit, whether utilities are included.
+- **Meadowchase terminates 26 September.** September rent, the early termination fee and the
+  security-deposit netting are real cash events that need a home in the categorization scheme
+  even though the house is out of projections.

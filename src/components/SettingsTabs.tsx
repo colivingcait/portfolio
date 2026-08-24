@@ -1,0 +1,36 @@
+'use client';
+
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+
+const TABS = [
+  { href: '/settings/entities', label: 'Entities' },
+  { href: '/settings/properties', label: 'Properties' },
+  { href: '/settings/ownership', label: 'Ownership' },
+  { href: '/settings/management', label: 'Management' },
+  { href: '/settings/accounts', label: 'Accounts' },
+  { href: '/settings/loans', label: 'Loans' },
+  { href: '/settings/leases', label: 'Leases' },
+  { href: '/settings/rules', label: 'Payee rules' },
+  { href: '/settings/capital', label: 'Capital' },
+  { href: '/settings/categories', label: 'Categories' },
+];
+
+export function SettingsTabs() {
+  const pathname = usePathname();
+  return (
+    <div className="mb-5 flex flex-wrap gap-1 border-b border-line pb-3">
+      {TABS.map((tab) => (
+        <Link
+          key={tab.href}
+          href={tab.href}
+          className={`rounded-md px-2.5 py-1 text-[13px] ${
+            pathname === tab.href ? 'bg-surface-2 text-text' : 'text-muted hover:text-text'
+          }`}
+        >
+          {tab.label}
+        </Link>
+      ))}
+    </div>
+  );
+}

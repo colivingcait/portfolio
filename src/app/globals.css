@@ -1,0 +1,75 @@
+@import 'tailwindcss';
+
+/*
+ * A single-user internal tool. Dense, numeric, quiet. Nothing here is trying
+ * to sell anything — the job is to make a wrong number obvious.
+ */
+@theme {
+  --color-ink: #0b0d10;
+  --color-surface: #12151a;
+  --color-surface-2: #171b22;
+  --color-line: #232a34;
+  --color-text: #e6e9ee;
+  --color-muted: #8d97a6;
+  --color-accent: #6ea8fe;
+  --color-good: #4ec98d;
+  --color-warn: #e5b567;
+  --color-bad: #e8756b;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-ink);
+  color: var(--color-text);
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Figures line up column-wise or they cannot be scanned. */
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+input,
+select,
+textarea {
+  background: var(--color-ink);
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  padding: 6px 8px;
+  color: var(--color-text);
+  width: 100%;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+input[type='checkbox'] {
+  width: auto;
+}
