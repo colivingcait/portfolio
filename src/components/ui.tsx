@@ -32,7 +32,7 @@ export function Panel({
   actions?: React.ReactNode;
 }) {
   return (
-    <section className="mb-5 rounded-lg border border-line bg-surface">
+    <section className="mb-5 rounded-lg border border-line bg-surface shadow-[0_1px_2px_rgba(16,24,40,0.05)]">
       {title ? (
         <div className="flex items-start justify-between gap-4 border-b border-line px-4 py-3">
           <div>

@@ -3,23 +3,36 @@
 /*
  * A single-user internal tool. Dense, numeric, quiet. Nothing here is trying
  * to sell anything — the job is to make a wrong number obvious.
+ *
+ * Light palette. Every colour in the app is one of these tokens and no
+ * component hardcodes a hex, so the whole theme lives in this block: swapping
+ * back to dark, or adding a prefers-color-scheme variant, means redefining
+ * these values and nothing else.
+ *
+ * The greys are cool rather than warm so that the semantic colours — a
+ * negative figure, an unverified badge, a statement that does not tie — read
+ * as signal against them rather than competing.
  */
 @theme {
-  --color-ink: #0b0d10;
-  --color-surface: #12151a;
-  --color-surface-2: #171b22;
-  --color-line: #232a34;
-  --color-text: #e6e9ee;
-  --color-muted: #8d97a6;
-  --color-accent: #6ea8fe;
-  --color-good: #4ec98d;
-  --color-warn: #e5b567;
-  --color-bad: #e8756b;
+  /* Page sits slightly off-white so white cards lift off it. */
+  --color-ink: #f4f6f8;
+  --color-surface: #ffffff;
+  --color-surface-2: #eef1f5;
+  --color-line: #dbe1e8;
+  --color-text: #111820;
+  --color-muted: #5b6775;
+
+  /* Semantic. Each clears 4.5:1 on white, since figures are small and dense. */
+  --color-accent: #1f6feb;
+  --color-good: #0f7a44;
+  --color-warn: #8a5a00;
+  --color-bad: #c0271c;
+
   --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
 }
 
 html {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
@@ -55,7 +68,7 @@ th {
 input,
 select,
 textarea {
-  background: var(--color-ink);
+  background: var(--color-surface);
   border: 1px solid var(--color-line);
   border-radius: 6px;
   padding: 6px 8px;
@@ -68,8 +81,13 @@ select:focus,
 textarea:focus {
   outline: none;
   border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 15%, transparent);
 }
 
 input[type='checkbox'] {
   width: auto;
+}
+
+input::placeholder {
+  color: color-mix(in srgb, var(--color-muted) 65%, transparent);
 }

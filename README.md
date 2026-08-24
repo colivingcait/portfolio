@@ -45,6 +45,11 @@ src/app/            screens
 prisma/schema.prisma  the §11 data model
 ```
 
+The interface is light, dense and quiet. Every colour in the app is one of the tokens defined
+in `src/app/globals.css` and no component hardcodes a hex, so the whole theme lives in that one
+block — switching it, or adding a `prefers-color-scheme` variant, means redefining those values
+and touching nothing else.
+
 The engine is kept dependency-free deliberately (§12, "Keep"): every identity in the spec is
 expressed once, there, and unit-tested without a database. `npm test` runs 97 tests covering
 the effective-share traversal, amortization, the PadSplit rules that must not drift, the

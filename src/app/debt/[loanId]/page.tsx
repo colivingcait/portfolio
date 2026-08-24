@@ -106,7 +106,7 @@ export default async function LoanPage({ params }: { params: Promise<{ loanId: s
 
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="rounded-lg border border-line bg-surface px-3 py-3">
+    <div className="rounded-lg border border-line bg-surface px-3 py-3 shadow-[0_1px_2px_rgba(16,24,40,0.05)]">
       <div className="text-[11px] uppercase tracking-wide text-muted">{label}</div>
       <div className="num mt-1 text-left text-[18px]">{value}</div>
       {hint ? <div className="mt-1 text-[11px] leading-snug text-muted">{hint}</div> : null}

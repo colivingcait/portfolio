@@ -140,7 +140,7 @@ function Stat({
   tone?: 'muted' | 'bad';
 }) {
   return (
-    <div className="rounded-lg border border-line bg-surface px-3 py-3">
+    <div className="rounded-lg border border-line bg-surface px-3 py-3 shadow-[0_1px_2px_rgba(16,24,40,0.05)]">
       <div className="text-[11px] uppercase tracking-wide text-muted">{label}</div>
       <div className={`num mt-1 text-left text-[18px] ${tone === 'bad' ? 'text-bad' : ''}`}>{value}</div>
       {hint ? <div className="mt-1 text-[11px] leading-snug text-muted">{hint}</div> : null}
