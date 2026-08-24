@@ -88,7 +88,12 @@ export default async function PropertiesPage() {
                     <span className="text-[12px]">{property.status}</span>
                   </Td>
                   <Td>
-                    <DeleteButton modelKey="property" id={property.id} />
+                    <div className="flex items-center gap-3">
+                      <Link href={`/settings/properties/${property.id}`} className="text-[12px] text-muted hover:text-accent">
+                        Edit
+                      </Link>
+                      <DeleteButton modelKey="property" id={property.id} />
+                    </div>
                   </Td>
                 </tr>
               ))}

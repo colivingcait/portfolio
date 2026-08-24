@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { prisma } from '@/lib/db';
 import { getSelectOptions } from '@/lib/queries';
 import { RecordForm } from '@/components/RecordForm';
@@ -106,7 +107,12 @@ export default async function CapitalPage() {
                     <span className="text-[12px] text-muted">{entry.memo ?? '—'}</span>
                   </Td>
                   <Td>
-                    <DeleteButton modelKey="capitalAccountEntry" id={entry.id} />
+                    <div className="flex items-center gap-3">
+                      <Link href={`/settings/capital/${entry.id}`} className="text-[12px] text-muted hover:text-accent">
+                        Edit
+                      </Link>
+                      <DeleteButton modelKey="capitalAccountEntry" id={entry.id} />
+                    </div>
                   </Td>
                 </tr>
               ))}

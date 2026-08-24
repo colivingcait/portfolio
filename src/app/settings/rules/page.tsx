@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { prisma } from '@/lib/db';
 import { getSelectOptions } from '@/lib/queries';
 import { RecordForm } from '@/components/RecordForm';
@@ -55,7 +56,12 @@ export default async function RulesPage() {
                   <Td>{category(rule.categoryKey)?.label ?? rule.categoryKey}</Td>
                   <Td right>{rule.priority}</Td>
                   <Td>
-                    <DeleteButton modelKey="payeeRule" id={rule.id} />
+                    <div className="flex items-center gap-3">
+                      <Link href={`/settings/rules/${rule.id}`} className="text-[12px] text-muted hover:text-accent">
+                        Edit
+                      </Link>
+                      <DeleteButton modelKey="payeeRule" id={rule.id} />
+                    </div>
                   </Td>
                 </tr>
               ))}

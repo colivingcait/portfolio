@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { prisma } from '@/lib/db';
 import { getSelectOptions } from '@/lib/queries';
 import { RecordForm } from '@/components/RecordForm';
@@ -63,7 +64,12 @@ export default async function AccountsPage() {
                   </Td>
                   <Td right>{account._count.statements}</Td>
                   <Td>
-                    <DeleteButton modelKey="bankAccount" id={account.id} />
+                    <div className="flex items-center gap-3">
+                      <Link href={`/settings/accounts/${account.id}`} className="text-[12px] text-muted hover:text-accent">
+                        Edit
+                      </Link>
+                      <DeleteButton modelKey="bankAccount" id={account.id} />
+                    </div>
                   </Td>
                 </tr>
               ))}

@@ -18,7 +18,11 @@ effective-share traversal and the maturity ladder working. Useful the day it shi
 - **Property detail** — ownership paths, management history with boundary warnings, loans,
   leases.
 - **Settings** — every step-1 record type, plus payee rules, capital accounts and the
-  category vocabulary.
+  category vocabulary. Every record is editable in place: deleting and re-adding a property
+  is not equivalent, since it cascades to that property's loans, accounts, management periods
+  and ownership interests.
+- **Ownership entry** — a whole split at once, with a running total that flags a stack missing
+  100% before it is saved rather than after.
 - **Imports / Review** — the screens exist and say plainly what they are waiting on.
 
 **Build order step 2 (§13.2) — bank statement import.** Pick a property's account, drop its CSV,

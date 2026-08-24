@@ -1,9 +1,9 @@
+import Link from 'next/link';
 import { prisma } from '@/lib/db';
 import { getOwnershipContext, getSelectOptions, todayIso } from '@/lib/queries';
-import { RecordForm } from '@/components/RecordForm';
 import { DeleteButton } from '@/components/DeleteButton';
-import { Empty, Note, PageHeader, Panel, Pct, Td, Th } from '@/components/ui';
-import { withOptions } from '../_shared/helpers';
+import { OwnershipSplitForm } from '@/components/OwnershipSplitForm';
+import { Badge, Empty, Note, PageHeader, Panel, Pct, Td, Th } from '@/components/ui';
 import { effectiveShare } from '@/lib/engine/ownership';
 
 export const dynamic = 'force-dynamic';
@@ -20,11 +20,19 @@ export default async function OwnershipPage() {
     prisma.property.findMany({ orderBy: { name: 'asc' } }),
   ]);
 
-  const fields = withOptions('ownershipInterest', {
-    ownerId: options.entities,
-    propertyId: options.properties,
-    ownedEntityId: options.entities,
-  });
+  // Grouped by what is owned, because that is the unit that has to total 100%.
+  const groups = new Map<string, { label: string; rows: typeof interests; total: number }>();
+  for (const interest of interests) {
+    const ownedId = interest.propertyId ?? interest.ownedEntityId ?? 'unknown';
+    const label = interest.property?.name ?? interest.ownedEntity?.name ?? 'Unknown';
+    const group = groups.get(ownedId) ?? { label, rows: [], total: 0 };
+    group.rows.push(interest);
+    const active = interest.startDate.toISOString().slice(0, 10) <= asOf &&
+      (!interest.endDate || interest.endDate.toISOString().slice(0, 10) >= asOf);
+    if (active) group.total += Number(interest.percent);
+    groups.set(ownedId, group);
+  }
+  const grouped = [...groups.entries()].sort((a, b) => a[1].label.localeCompare(b[1].label));
 
   return (
     <>
@@ -33,23 +41,18 @@ export default async function OwnershipPage() {
         subtitle="A graph, not a field. Effective share is the sum, over every path from you to a property, of the product of the percentages along that path — so half of a property held by an entity you half-own is a quarter."
       />
 
-      {context.warnings.length > 0 ? (
-        <Note>
-          {context.warnings.length} {context.warnings.length === 1 ? 'holding does' : 'holdings do'} not total 100% as of{' '}
-          {asOf}:{' '}
-          {context.warnings
-            .map((w) => `${context.names.get(w.ownedId) ?? w.ownedId} at ${w.totalPercent}%`)
-            .join(', ')}
-          . This is a warning, not a block — partial records are normal while you are entering them.
+      {!context.viewerId ? (
+        <Note tone="bad">
+          No entity is marked as you, so no effective share can be computed. Set “This is me” on your own entity in{' '}
+          <Link href="/settings/entities" className="underline">Entities</Link>.
         </Note>
       ) : null}
 
-      {!context.viewerId ? (
-        <Note tone="bad">No entity is marked as you, so no effective share can be computed.</Note>
-      ) : null}
-
-      <Panel title="Add an interest" description="Dating every interest means a partner buying in or out is a new record, not an edit that silently rewrites history.">
-        <RecordForm modelKey="ownershipInterest" fields={fields} />
+      <Panel
+        title="Add owners"
+        description="Enter a whole split at once — every partner in one property, or everyone who holds the LLC. The running total flags a stack that misses 100% before it is saved rather than after."
+      >
+        <OwnershipSplitForm entities={options.entities} properties={options.properties} />
       </Panel>
 
       {context.viewerId && properties.length > 0 ? (
@@ -82,7 +85,7 @@ export default async function OwnershipPage() {
                           ? '—'
                           : equity.paths
                               .map((path) => path.nodes.map((n) => context.names.get(n) ?? 'you').join(' → '))
-                              .join(' | ')}
+                              .join('  |  ')}
                       </span>
                     </Td>
                   </tr>
@@ -93,54 +96,74 @@ export default async function OwnershipPage() {
         </Panel>
       ) : null}
 
-      <Panel title={`${interests.length} interests`}>
-        {interests.length === 0 ? (
-          <Empty>Nothing yet.</Empty>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <Th>Owner</Th>
-                <Th>Holds</Th>
-                <Th right>Percent</Th>
-                <Th right>Distribution</Th>
-                <Th>From</Th>
-                <Th>To</Th>
-                <Th>Basis</Th>
-                <Th />
-              </tr>
-            </thead>
-            <tbody>
-              {interests.map((interest) => (
-                <tr key={interest.id}>
-                  <Td>{interest.owner.name}</Td>
-                  <Td>{interest.property?.name ?? interest.ownedEntity?.name ?? '—'}</Td>
-                  <Td right>{String(interest.percent)}%</Td>
-                  <Td right>
-                    <span className="text-muted">
-                      {interest.distributionPercent ? `${String(interest.distributionPercent)}%` : '—'}
-                    </span>
-                  </Td>
-                  <Td>
-                    <span className="num">{interest.startDate.toISOString().slice(0, 10)}</span>
-                  </Td>
-                  <Td>
-                    <span className="num text-muted">
-                      {interest.endDate ? interest.endDate.toISOString().slice(0, 10) : 'open'}
-                    </span>
-                  </Td>
-                  <Td>
-                    <span className="text-[12px] text-muted">{interest.basis}</span>
-                  </Td>
-                  <Td>
-                    <DeleteButton modelKey="ownershipInterest" id={interest.id} />
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </Panel>
+      {grouped.length === 0 ? (
+        <Panel title="Interests">
+          <Empty>Nothing recorded yet.</Empty>
+        </Panel>
+      ) : (
+        grouped.map(([ownedId, group]) => {
+          const off = Math.abs(group.total - 100) > 0.005;
+          return (
+            <Panel
+              key={ownedId}
+              title={group.label}
+              actions={
+                <span className={`num text-[13px] ${off ? 'text-warn' : 'text-good'}`}>
+                  {group.total.toFixed(group.total % 1 === 0 ? 0 : 3)}%
+                  {off ? <Badge tone="warn">not 100%</Badge> : null}
+                </span>
+              }
+              description={off ? 'Interests in force today do not total 100%. A warning, not a block — partial records are normal while you are entering them.' : undefined}
+            >
+              <table>
+                <thead>
+                  <tr>
+                    <Th>Owner</Th>
+                    <Th right>Percent</Th>
+                    <Th right>Distribution</Th>
+                    <Th>From</Th>
+                    <Th>To</Th>
+                    <Th>Basis</Th>
+                    <Th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {group.rows.map((interest) => (
+                    <tr key={interest.id}>
+                      <Td>{interest.owner.name}</Td>
+                      <Td right>{String(interest.percent)}%</Td>
+                      <Td right>
+                        <span className="text-muted">
+                          {interest.distributionPercent ? `${String(interest.distributionPercent)}%` : '—'}
+                        </span>
+                      </Td>
+                      <Td>
+                        <span className="num">{interest.startDate.toISOString().slice(0, 10)}</span>
+                      </Td>
+                      <Td>
+                        <span className="num text-muted">
+                          {interest.endDate ? interest.endDate.toISOString().slice(0, 10) : 'open'}
+                        </span>
+                      </Td>
+                      <Td>
+                        <span className="text-[12px] text-muted">{interest.basis}</span>
+                      </Td>
+                      <Td>
+                        <div className="flex items-center gap-3">
+                          <Link href={`/settings/ownership/${interest.id}`} className="text-[12px] text-muted hover:text-accent">
+                            Edit
+                          </Link>
+                          <DeleteButton modelKey="ownershipInterest" id={interest.id} />
+                        </div>
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Panel>
+          );
+        })
+      )}
     </>
   );
 }

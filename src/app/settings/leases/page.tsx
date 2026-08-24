@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { prisma } from '@/lib/db';
 import { getSelectOptions } from '@/lib/queries';
 import { RecordForm } from '@/components/RecordForm';
@@ -71,7 +72,12 @@ export default async function LeasesPage() {
                     </span>
                   </Td>
                   <Td>
-                    <DeleteButton modelKey="lease" id={lease.id} />
+                    <div className="flex items-center gap-3">
+                      <Link href={`/settings/leases/${lease.id}`} className="text-[12px] text-muted hover:text-accent">
+                        Edit
+                      </Link>
+                      <DeleteButton modelKey="lease" id={lease.id} />
+                    </div>
                   </Td>
                 </tr>
               ))}

@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { prisma } from '@/lib/db';
 import { getSelectOptions } from '@/lib/queries';
 import { RecordForm } from '@/components/RecordForm';
@@ -72,7 +73,12 @@ export default async function ManagementPage() {
                     </span>
                   </Td>
                   <Td>
-                    <DeleteButton modelKey="managementPeriod" id={period.id} />
+                    <div className="flex items-center gap-3">
+                      <Link href={`/settings/management/${period.id}`} className="text-[12px] text-muted hover:text-accent">
+                        Edit
+                      </Link>
+                      <DeleteButton modelKey="managementPeriod" id={period.id} />
+                    </div>
                   </Td>
                 </tr>
               ))}

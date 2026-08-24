@@ -84,7 +84,12 @@ export default async function LoansPage() {
                       <span className="text-[12px] text-muted">{loan.status}</span>
                     </Td>
                     <Td>
+                      <div className="flex items-center gap-3">
+                      <Link href={`/settings/loans/${loan.id}`} className="text-[12px] text-muted hover:text-accent">
+                        Edit
+                      </Link>
                       <DeleteButton modelKey="loan" id={loan.id} />
+                    </div>
                     </Td>
                   </tr>
                 );
