@@ -76,6 +76,12 @@ Set three environment variables on the project: `DATABASE_URL` (Supabase pooled,
 its own `POSTGRES_*` names — the first two are read by `prisma/schema.prisma` and must be set
 explicitly whatever else is present.
 
+Take both URLs from Supabase's Connect panel (ORMs → Prisma) and use the **pooler** for each:
+transaction pooler on 6543 for `DATABASE_URL`, session pooler on 5432 for `DIRECT_URL`. The
+`db.<ref>.supabase.co` direct host is IPv6-only on new projects and a Vercel build container
+generally cannot reach it, so `prisma migrate deploy` fails there regardless of the URL being
+well-formed.
+
 Paste the connection strings **bare**: no surrounding quotes, no `DATABASE_URL=` prefix.
 Vercel stores the value verbatim, so a copied-in quote makes the scheme `"postgresql` and the
 build fails with `P1013: The provided database string is invalid`. `DIRECT_URL` is the one
