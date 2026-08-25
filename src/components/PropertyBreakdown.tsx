@@ -190,11 +190,11 @@ function PropertyCard({
           {property.rooms.length === 0 ? (
             <p className="text-[12px] text-muted">No room-level lines imported for this house.</p>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="max-w-2xl overflow-x-auto">
               <table>
                 <thead>
                   <tr>
-                    <SortableTh label="Room" grow active={sort === 'roomNumber'} ascending={ascending} onClick={() => sortBy('roomNumber')} />
+                    <SortableTh label="Room" active={sort === 'roomNumber'} ascending={ascending} onClick={() => sortBy('roomNumber')} />
                     <SortableTh label="People" right active={sort === 'people'} ascending={ascending} onClick={() => sortBy('people')} />
                     <th className="px-2 py-1.5 text-left text-[11px] font-medium uppercase tracking-wide text-muted">
                       Earnings by month
@@ -206,7 +206,7 @@ function PropertyCard({
                 <tbody>
                   {rooms.map((room) => (
                     <tr key={room.roomNumber} className="hover:bg-surface-2/50">
-                      <td className="w-full px-2 py-1.5 text-[12px]">Room {room.roomNumber}</td>
+                      <td className="px-2 py-1.5 text-[12px]">Room {room.roomNumber}</td>
                       <td className="px-2 py-1.5 text-right">
                         <span
                           className={`num text-[12px] ${room.people >= 4 ? 'text-bad' : room.people >= 3 ? 'text-warn' : 'text-muted'}`}
@@ -285,25 +285,18 @@ function Cell({
 function SortableTh({
   label,
   right = false,
-  grow = false,
   active,
   ascending,
   onClick,
 }: {
   label: string;
   right?: boolean;
-  /** Takes up the table's slack, so the other columns sit tight to their numbers. */
-  grow?: boolean;
   active: boolean;
   ascending: boolean;
   onClick: () => void;
 }) {
   return (
-    <th
-      className={`px-2 py-1.5 text-[11px] font-medium uppercase tracking-wide ${right ? 'text-right' : 'text-left'} ${
-        grow ? 'w-full' : ''
-      }`}
-    >
+    <th className={`px-2 py-1.5 text-[11px] font-medium uppercase tracking-wide ${right ? 'text-right' : 'text-left'}`}>
       <button
         type="button"
         onClick={onClick}
