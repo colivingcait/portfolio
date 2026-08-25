@@ -48,20 +48,27 @@ export interface ClassifiedTransaction extends RawTransaction {
  * Most specific wins: highest priority, then longest match string. Anything
  * unmatched lands in the review list rather than being guessed at.
  */
+/** Lowercased with runs of whitespace collapsed, for substring comparison. */
+function collapse(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
 export function matchRule(
   rules: readonly PayeeRule[],
   description: string,
   bankAccountId: string | null,
   amountCents?: Cents,
 ): PayeeRule | null {
-  const haystack = description.toLowerCase();
+  // Whitespace is collapsed on both sides: a PDF can put two spaces where the
+  // rule has one, and the rule should not care.
+  const haystack = collapse(description);
   const movement: RuleDirection | null =
     amountCents === undefined ? null : amountCents < 0 ? 'debit' : 'credit';
 
   const candidates = rules.filter((r) => {
     if (r.bankAccountId !== null && r.bankAccountId !== bankAccountId) return false;
     if (r.match.trim() === '') return false;
-    if (!haystack.includes(r.match.toLowerCase())) return false;
+    if (!haystack.includes(collapse(r.match))) return false;
     const direction = r.direction ?? 'any';
     if (direction === 'any' || movement === null) return true;
     return direction === movement;

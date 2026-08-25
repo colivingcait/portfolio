@@ -17,6 +17,8 @@ import { category, oppositeCategory } from './engine/categories';
 import { suggestPayee } from './import/payee';
 import { monthOf } from './engine/dates';
 
+export type RuleScope = 'account' | 'all';
+
 export interface StatementPreview {
   ok: boolean;
   error?: string;
@@ -397,6 +399,12 @@ export async function confirmTransaction(
   createRule: boolean,
   /** What the rule should match on. Defaults to the suggestion. */
   ruleMatch?: string,
+  /**
+   * 'account' writes a rule for this bank account alone; 'all' writes one that
+   * covers every property. A utility that bills three houses wants 'all'; a
+   * transfer to one specific outside account wants 'account'.
+   */
+  scope: RuleScope = 'account',
 ): Promise<{ ok: boolean; error?: string; ruleCreated?: boolean; alsoCategorized?: number }> {
   if (!category(categoryKey)) return { ok: false, error: `Unknown category: ${categoryKey}` };
 
@@ -407,6 +415,9 @@ export async function confirmTransaction(
   if (!transaction) return { ok: false, error: 'That transaction no longer exists.' };
 
   const bankAccountId = transaction.statement.bankAccountId;
+  // Null on a rule means every account, which is how a rule reaches properties
+  // other than the one the statement came from.
+  const ruleAccountId = scope === 'all' ? null : bankAccountId;
   let ruleCreated = false;
 
   await prisma.bankTransaction.update({
@@ -417,7 +428,7 @@ export async function confirmTransaction(
   let alsoCategorized = 0;
   if (createRule) {
     const match = (ruleMatch ?? suggestPayee(transaction.description).match).trim();
-    const duplicate = await prisma.payeeRule.findFirst({ where: { bankAccountId, match } });
+    const duplicate = await prisma.payeeRule.findFirst({ where: { bankAccountId: ruleAccountId, match } });
     if (!duplicate && match.length >= 3) {
       // Where a category has an opposite — a draw against a contribution, a
       // deposit taken against one returned — the same payee means different
@@ -429,22 +440,28 @@ export async function confirmTransaction(
       if (opposite) {
         await prisma.payeeRule.createMany({
           data: [
-            { bankAccountId, match, categoryKey, direction: thisWay, priority: 0 },
-            { bankAccountId, match, categoryKey: opposite.key, direction: opposite.direction, priority: 0 },
+            { bankAccountId: ruleAccountId, match, categoryKey, direction: thisWay, priority: 0 },
+            { bankAccountId: ruleAccountId, match, categoryKey: opposite.key, direction: opposite.direction, priority: 0 },
           ],
         });
       } else {
-        await prisma.payeeRule.create({ data: { bankAccountId, match, categoryKey, direction: 'any', priority: 0 } });
+        await prisma.payeeRule.create({
+          data: { bankAccountId: ruleAccountId, match, categoryKey, direction: 'any', priority: 0 },
+        });
       }
       ruleCreated = true;
 
       // Apply it to everything already imported on this account that is still
       // unmatched — the rule is retroactive by nature.
       const orphans = await prisma.bankTransaction.findMany({
-        where: { statement: { bankAccountId }, categoryKey: null },
+        where: {
+          categoryKey: null,
+          ...(ruleAccountId ? { statement: { bankAccountId: ruleAccountId } } : {}),
+        },
+        include: { statement: { include: { bankAccount: true } } },
       });
       const opposite2 = oppositeCategory(categoryKey);
-      const hits = orphans.filter((o) => o.description.toLowerCase().includes(match.toLowerCase()));
+      const hits = orphans.filter((o) => collapse(o.description).includes(collapse(match)));
 
       if (hits.length > 0) {
         if (opposite2) {
@@ -468,9 +485,18 @@ export async function confirmTransaction(
         }
         alsoCategorized = hits.length;
 
-        // Those rows may span other months, all of which need recomputing.
-        const months = [...new Set(hits.map((h) => monthOf(requireIsoDate(h.date))))];
-        await recomputeMonths(transaction.statement.bankAccount.propertyId, months);
+        // Those rows may span other months — and, on a portfolio-wide rule,
+        // other properties. Every rollup they touch has to be rebuilt.
+        const byProperty = new Map<string, Set<string>>();
+        for (const hit of hits) {
+          const propertyId = hit.statement.bankAccount.propertyId;
+          const set = byProperty.get(propertyId) ?? new Set<string>();
+          set.add(monthOf(requireIsoDate(hit.date)));
+          byProperty.set(propertyId, set);
+        }
+        for (const [propertyId, set] of byProperty) {
+          await recomputeMonths(propertyId, [...set]);
+        }
       }
     }
   }
@@ -501,8 +527,10 @@ export interface RuleSuggestion {
   match: string;
   reason: string;
   confidence: 'high' | 'medium' | 'low';
-  /** How many other unmatched rows this rule would also catch. */
+  /** How many other unmatched rows this rule would also catch on this account. */
   alsoMatches: number;
+  /** And across every property, which is what widening the rule would reach. */
+  alsoMatchesEverywhere: number;
 }
 
 /**
@@ -522,19 +550,26 @@ export async function suggestRule(transactionId: string, matchOverride?: string)
   const suggestion = suggestPayee(transaction.description);
   const match = (matchOverride ?? suggestion.match).trim();
 
+  // Counted twice: what it catches here, and what it would catch if the rule
+  // were widened to every property. The same utility often bills more than one
+  // house, and a rule learned on one of them silently ignores the others.
   const others = await prisma.bankTransaction.findMany({
-    where: {
-      id: { not: transactionId },
-      categoryKey: null,
-      statement: { bankAccountId: transaction.statement.bankAccountId },
-    },
-    select: { description: true },
+    where: { id: { not: transactionId }, categoryKey: null },
+    select: { description: true, statement: { select: { bankAccountId: true } } },
   });
+
+  const hits = match === '' ? [] : others.filter((o) => collapse(o.description).includes(collapse(match)));
 
   return {
     match,
     reason: suggestion.reason,
     confidence: suggestion.confidence,
-    alsoMatches: match === '' ? 0 : others.filter((o) => o.description.toLowerCase().includes(match.toLowerCase())).length,
+    alsoMatches: hits.filter((h) => h.statement.bankAccountId === transaction.statement.bankAccountId).length,
+    alsoMatchesEverywhere: hits.length,
   };
+}
+
+/** Lowercased with whitespace collapsed, matching how rules are compared. */
+function collapse(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().toLowerCase();
 }

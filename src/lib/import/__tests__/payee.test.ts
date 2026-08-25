@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { achOriginator, cardMerchant, countMatches, stripNoise, suggestPayee } from '../payee';
+import { achOriginator, cardMerchant, countMatches, stripNoise, suggestPayee,
+  asLiteralFragment,
+  repairMatch,
+} from '../payee';
 
 /**
  * These are the shapes a real Chase statement produces. The whole problem is
@@ -84,5 +87,104 @@ describe('showing what a rule would catch', () => {
     ];
     expect(countMatches('Gas South', descriptions)).toBe(2);
     expect(countMatches('', descriptions)).toBe(0);
+  });
+});
+
+describe('a suggestion has to appear in the line it came from', () => {
+  // The rule that broke this: stripping noise from the MIDDLE of a line left
+  // words that were never adjacent joined together, and the rule matched
+  // nothing — not even the transaction it was written from. Every shape here
+  // is one where a word gets removed from between two words worth keeping.
+  const LINES = [
+    'Zelle Payment To Jessica Wood 23482748291',
+    'Zelle Payment To Jessica Wood JPM99AB3XYZ',
+    'Zelle Payment From Jessica Wood 23482748291',
+    'Online Transfer To Jessica Wood 12345678',
+    'ACH Debit DEKALB CO GA WATER SEWER 073126',
+    'Orig CO Name:Gas South Orig ID:9999999999 Desc Date:0731 CO Entry Descr:UTILITY',
+    'Card Purchase 06/30 Amazon.Com*Is6Tv3Bn3 Amzn.Com/Bill WA Card 2804',
+    'Recurring Card Purchase 07/01 Ahs Ahs.Com 888-4297400 TN Card 2804',
+    'GEORGIA POWER PAYMENT 073126 WEB ID 1234567',
+    'Online Transfer To Chk ...0977 Transaction# 22841',
+    'PADSPLIT INC PAYOUT 07/31 TRACE#123456789',
+    '07/15 ATM WITHDRAWAL 000012345 SOME ST ATLANTA GA',
+  ];
+
+  it.each(LINES)('is a literal substring of %s', (line) => {
+    const { match } = suggestPayee(line);
+    expect(match.length).toBeGreaterThan(0);
+    expect(line.toLowerCase().replace(/\s+/g, ' ')).toContain(match.toLowerCase());
+  });
+
+  it('names the person on a Zelle payment, not Zelle', () => {
+    expect(suggestPayee('Zelle Payment To Jessica Wood 23482748291').match).toBe('Jessica Wood');
+  });
+
+  it('gives the same rule for money out and money in to the same person', () => {
+    // Otherwise a refund from Jessica needs its own rule, and the pair of
+    // directional rules written on confirmation would not line up.
+    expect(suggestPayee('Zelle Payment To Jessica Wood 23482748291').match).toBe(
+      suggestPayee('Zelle Payment From Jessica Wood 99887766').match,
+    );
+  });
+
+  it('survives a reference code changing between months', () => {
+    expect(suggestPayee('Zelle Payment To Jessica Wood JPM99AB3XYZ').match).toBe(
+      suggestPayee('Zelle Payment To Jessica Wood JPM40ZZ9QQQ').match,
+    );
+  });
+});
+
+describe('reducing a candidate to something literal', () => {
+  it('keeps a candidate that already appears in the line', () => {
+    expect(asLiteralFragment('Gas South', 'Orig CO Name:Gas South Orig ID:1')).toBe('Gas South');
+  });
+
+  it('drops back to the longest run that does appear', () => {
+    expect(asLiteralFragment('Zelle Jessica Wood', 'Zelle Payment To Jessica Wood 1')).toBe('Jessica Wood');
+  });
+
+  it('returns null when not one word of the candidate is in the line', () => {
+    expect(asLiteralFragment('Georgia Power', 'AHS HOME WARRANTY')).toBeNull();
+  });
+
+  it('ignores how the whitespace was spaced', () => {
+    expect(asLiteralFragment('Gas South', 'ACH   Gas   South   Payment')).toBe('Gas South');
+  });
+});
+
+describe('mending a rule that catches nothing', () => {
+  const lines = [
+    'Zelle Payment To Jessica Wood 23482748291',
+    'Zelle Payment To Jessica Wood 99887766554',
+    'Zelle Payment From Jessica Wood 11223344556',
+    'GEORGIA POWER PAYMENT 073126',
+  ];
+
+  it('reduces the words to the run that really is on the statement', () => {
+    expect(repairMatch('Zelle Jessica Wood', lines)).toEqual({ match: 'Jessica Wood', catches: 3 });
+  });
+
+  it('leaves a rule that already catches something alone', () => {
+    expect(repairMatch('GEORGIA POWER', lines)).toBeNull();
+  });
+
+  it('will not guess at a rule whose words are nowhere on the account', () => {
+    // Nothing to mend it from. A wrong repair is worse than a dead rule the
+    // person can see and fix themselves.
+    expect(repairMatch('DEKALB WATER', lines)).toBeNull();
+  });
+
+  it('prefers the fragment that catches the most lines', () => {
+    const mixed = [
+      'Zelle Payment To Jessica Wood 1',
+      'Zelle Payment To Jessica Wood 2',
+      'Card Purchase Wood Supply Co 3',
+    ];
+    expect(repairMatch('Zelle Jessica Wood', mixed)?.match).toBe('Jessica Wood');
+  });
+
+  it('says nothing about an empty match', () => {
+    expect(repairMatch('   ', lines)).toBeNull();
   });
 });

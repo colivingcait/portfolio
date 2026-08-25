@@ -236,3 +236,17 @@ describe('rules that depend on which way the money moved', () => {
     ]);
   });
 });
+
+describe('matching is not thrown by whitespace', () => {
+  it('matches a rule with single spaces against a description with several', () => {
+    // PDF extraction spaces words by position, so the same line can come back
+    // with two spaces one month and one the next.
+    const spaced: PayeeRule[] = [{ id: 'w1', bankAccountId: ACCOUNT, match: 'GAS SOUTH', categoryKey: 'gas' }];
+    expect(matchRule(spaced, 'ACH DEBIT   GAS   SOUTH   0731', ACCOUNT)?.id).toBe('w1');
+  });
+
+  it('matches a rule that itself carries stray whitespace', () => {
+    const spaced: PayeeRule[] = [{ id: 'w2', bankAccountId: ACCOUNT, match: '  GAS  SOUTH ', categoryKey: 'gas' }];
+    expect(matchRule(spaced, 'ACH DEBIT GAS SOUTH 0731', ACCOUNT)?.id).toBe('w2');
+  });
+});

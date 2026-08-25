@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { confirmTransaction, suggestRule, type RuleSuggestion } from '@/lib/import-actions';
+import { confirmTransaction, suggestRule, type RuleScope, type RuleSuggestion } from '@/lib/import-actions';
 import { formatCents } from '@/lib/engine/money';
 
 interface Props {
@@ -20,6 +20,9 @@ export function ReviewRow({ categories, id, date, propertyName, description, amo
   const [pending, startTransition] = useTransition();
   const [categoryKey, setCategoryKey] = useState(suggestion);
   const [createRule, setCreateRule] = useState(true);
+  // Account-scoped by default: widening a rule is a click, but a rule that has
+  // already miscategorized another property's statement is a mess to undo.
+  const [scope, setScope] = useState<RuleScope>('account');
   const [rule, setRule] = useState<RuleSuggestion | null>(null);
   const [match, setMatch] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -46,7 +49,7 @@ export function ReviewRow({ categories, id, date, propertyName, description, amo
   function confirm() {
     setError(null);
     startTransition(async () => {
-      const result = await confirmTransaction(id, categoryKey, createRule, match);
+      const result = await confirmTransaction(id, categoryKey, createRule, match, scope);
       if (result.ok) {
         setDone(
           result.alsoCategorized
@@ -77,13 +80,30 @@ export function ReviewRow({ categories, id, date, propertyName, description, amo
               onChange={(e) => recount(e.target.value)}
               className="max-w-[220px] py-0.5 text-[12px]"
             />
+            <select
+              aria-label="Rule scope"
+              value={scope}
+              onChange={(e) => setScope(e.target.value as RuleScope)}
+              className="py-0.5 text-[11px]"
+            >
+              <option value="account">on this account</option>
+              <option value="all">on every property</option>
+            </select>
             {rule ? (
               <span className="text-[11px] text-muted">
-                {rule.alsoMatches > 0 ? (
-                  <span className="text-good">catches {rule.alsoMatches} more here</span>
+                {(scope === 'all' ? rule.alsoMatchesEverywhere : rule.alsoMatches) > 0 ? (
+                  <span className="text-good">
+                    catches {scope === 'all' ? rule.alsoMatchesEverywhere : rule.alsoMatches} more
+                  </span>
                 ) : (
                   'this row only'
                 )}
+                {scope === 'account' && rule.alsoMatchesEverywhere > rule.alsoMatches ? (
+                  <span className="text-warn">
+                    {' '}
+                    · {rule.alsoMatchesEverywhere - rule.alsoMatches} more on other properties
+                  </span>
+                ) : null}
                 {rule.confidence !== 'high' ? <span className="text-warn"> · check this one</span> : null}
               </span>
             ) : null}
