@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildScheduleE, mappingTable, type TaxTransaction } from '../tax';
-import { isCapitalizable, keyFromLabel, mergeCatalog, taxLineFor, taxTreatmentFor } from '../categories';
+import { isCapitalizable, keyFromLabel, mergeCatalog, taxLineFor, taxTreatmentFor, CATEGORIES } from '../categories';
 import { cents } from '../money';
 
 function tx(categoryKey: string | null, amount: number, date = '2026-03-15'): TaxTransaction {
@@ -10,30 +10,30 @@ function tx(categoryKey: string | null, amount: number, date = '2026-03-15'): Ta
 describe('the mapping stays behind the scenes', () => {
   it('sends every utility to one line without changing what you pick', () => {
     for (const key of ['electric', 'gas', 'water_sewer', 'trash', 'internet']) {
-      expect(taxLineFor(key)).toBe('utilities');
+      expect(taxLineFor(key, CATEGORIES)).toBe('utilities');
     }
   });
 
   it('separates repairs from cleaning, as the form does', () => {
-    expect(taxLineFor('maintenance_repairs')).toBe('repairs');
-    expect(taxLineFor('turn_cleaning')).toBe('cleaning_maintenance');
-    expect(taxLineFor('lawn')).toBe('cleaning_maintenance');
+    expect(taxLineFor('maintenance_repairs', CATEGORIES)).toBe('repairs');
+    expect(taxLineFor('turn_cleaning', CATEGORIES)).toBe('cleaning_maintenance');
+    expect(taxLineFor('lawn', CATEGORIES)).toBe('cleaning_maintenance');
   });
 
   it('treats furnishings and capex as depreciable, never deductible', () => {
-    expect(isCapitalizable('furnishings')).toBe(true);
-    expect(isCapitalizable('capex')).toBe(true);
-    expect(isCapitalizable('supplies')).toBe(false);
+    expect(isCapitalizable('furnishings', CATEGORIES)).toBe(true);
+    expect(isCapitalizable('capex', CATEGORIES)).toBe(true);
+    expect(isCapitalizable('supplies', CATEGORIES)).toBe(false);
   });
 
   it('does not report deposits, transfers or owner cash', () => {
     for (const key of ['security_deposit_received', 'transfer_between_own_accounts', 'owner_draw', 'not_portfolio']) {
-      expect(taxTreatmentFor(key)).toBe('not_reportable');
+      expect(taxTreatmentFor(key, CATEGORIES)).toBe('not_reportable');
     }
   });
 
   it('keeps debt service off the form, since only its interest half is deductible', () => {
-    expect(taxTreatmentFor('debt_service')).toBe('not_reportable');
+    expect(taxTreatmentFor('debt_service', CATEGORIES)).toBe('not_reportable');
   });
 
   it('gives every category a treatment, so nothing falls through unclassified', () => {
@@ -59,6 +59,7 @@ describe('building a year', () => {
   ];
 
   const report = buildScheduleE({
+      catalog: CATEGORIES,
     year: 2026,
     propertyId: 'p1',
     transactions,
@@ -107,6 +108,7 @@ describe('building a year', () => {
 
   it('says plainly when the year is not finished', () => {
     const withGaps = buildScheduleE({
+      catalog: CATEGORIES,
       year: 2026,
       propertyId: 'p1',
       transactions: [...transactions, tx(null, -145, '2026-06-01')],
@@ -159,6 +161,7 @@ describe('categories added later', () => {
     // A loan funding a repair is not revenue; the repair is classified on its
     // own merits and the interest is deductible as it is paid.
     const report = buildScheduleE({
+      catalog: CATEGORIES,
       year: 2026,
       propertyId: 'p1',
       transactions: [tx('loan_proceeds', 18_000, '2026-04-01'), tx('capex', -18_000, '2026-04-08')],
@@ -176,6 +179,7 @@ describe('escrow inside a mortgage payment', () => {
 
   it('puts what the servicer disbursed on the taxes and insurance lines', () => {
     const report = buildScheduleE({
+      catalog: CATEGORIES,
       ...base,
       escrowPaidCents: cents(4_200),
       escrowTaxCents: cents(2_400),
@@ -191,7 +195,8 @@ describe('escrow inside a mortgage payment', () => {
   it('deducts nothing and says so when the split is unknown', () => {
     // Paying into escrow is not a deduction; guessing the split would put a
     // made-up number on a tax return.
-    const report = buildScheduleE({ ...base, escrowPaidCents: cents(4_200) });
+    const report = buildScheduleE({
+      catalog: CATEGORIES, ...base, escrowPaidCents: cents(4_200) });
     expect(report.lines.find((l) => l.line === 'taxes')?.amountCents ?? 0).toBe(0);
     expect(report.unallocatedEscrowCents).toBe(cents(4_200));
     expect(report.warnings.some((w) => w.includes('escrow'))).toBe(true);
@@ -200,6 +205,7 @@ describe('escrow inside a mortgage payment', () => {
 
   it('reports only the remainder when the split covers part of what went in', () => {
     const report = buildScheduleE({
+      catalog: CATEGORIES,
       ...base,
       escrowPaidCents: cents(4_200),
       escrowTaxCents: cents(2_400),
@@ -210,6 +216,7 @@ describe('escrow inside a mortgage payment', () => {
   it('never reports negative escrow when disbursements exceed payments in', () => {
     // A shortage the servicer covered, then billed for. Not a memo item.
     const report = buildScheduleE({
+      catalog: CATEGORIES,
       ...base,
       escrowPaidCents: cents(4_200),
       escrowTaxCents: cents(3_000),
@@ -220,6 +227,7 @@ describe('escrow inside a mortgage payment', () => {
 
   it('keeps escrow out of the interest line', () => {
     const report = buildScheduleE({
+      catalog: CATEGORIES,
       ...base,
       mortgageInterestCents: cents(9_000),
       escrowPaidCents: cents(4_200),

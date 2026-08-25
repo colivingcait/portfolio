@@ -45,7 +45,7 @@ export interface BankDerived {
  * authoritative for it: the bank shows one number, the schedule explains it
  * as principal and interest (§8).
  */
-export function deriveFromBank(totals: PeriodTotals, catalog?: CategoryCatalog): BankDerived {
+export function deriveFromBank(totals: PeriodTotals, catalog: CategoryCatalog): BankDerived {
   let revenue = 0;
   let deposits = 0;
   let opex = 0;

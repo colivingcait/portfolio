@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { CATEGORIES } from '../categories';
 import { buildBalanceSheet, buildPnl, type LedgerLine } from '../statements';
 import { cents } from '../money';
 
@@ -22,7 +23,7 @@ describe('the profit and loss', () => {
         line('2026-07', 'electric', -280),
         line('2026-07', 'lawn', -120),
       ],
-      MONTHS,
+      MONTHS, { catalog: CATEGORIES },
     );
 
     expect(pnl.incomeByMonth['2026-06']).toBe(cents(5_000));
@@ -32,7 +33,7 @@ describe('the profit and loss', () => {
   });
 
   it('shows expenses as positive figures, the section carrying the sign', () => {
-    const pnl = buildPnl([line('2026-06', 'electric', -300)], MONTHS);
+    const pnl = buildPnl([line('2026-06', 'electric', -300)], MONTHS, { catalog: CATEGORIES });
     expect(pnl.expenses[0]).toMatchObject({ categoryKey: 'electric', label: 'Electric', totalCents: cents(300) });
   });
 
@@ -41,7 +42,7 @@ describe('the profit and loss', () => {
     // good month out of a quiet one.
     const pnl = buildPnl(
       [line('2026-06', 'rental_income', 1_000), line('2026-06', 'security_deposit_received', 1_500)],
-      MONTHS,
+      MONTHS, { catalog: CATEGORIES },
     );
     expect(pnl.totalIncomeCents).toBe(cents(1_000));
     expect(pnl.excludedCents).toBe(cents(1_500));
@@ -50,14 +51,14 @@ describe('the profit and loss', () => {
   it('keeps owner draws and transfers out of both sides', () => {
     const pnl = buildPnl(
       [line('2026-06', 'owner_draw', -2_000), line('2026-06', 'transfer_between_own_accounts', -500)],
-      MONTHS,
+      MONTHS, { catalog: CATEGORIES },
     );
     expect(pnl.totalExpenseCents).toBe(0);
     expect(pnl.excludedCents).toBe(cents(-2_500));
   });
 
   it('counts uncategorized rows apart, so a total is never quietly short', () => {
-    const pnl = buildPnl([line('2026-06', null, -400)], MONTHS);
+    const pnl = buildPnl([line('2026-06', null, -400)], MONTHS, { catalog: CATEGORIES });
     expect(pnl.uncategorizedCount).toBe(1);
     expect(pnl.uncategorizedCents).toBe(cents(-400));
     expect(pnl.totalExpenseCents).toBe(0);
@@ -65,19 +66,19 @@ describe('the profit and loss', () => {
 
   it('drops an intercompany fee from a consolidated view', () => {
     const lines = [line('2026-06', 'rental_income', 5_000), line('2026-06', 'operator_management_fee', -500)];
-    expect(buildPnl(lines, MONTHS).totalExpenseCents).toBe(cents(500));
-    expect(buildPnl(lines, MONTHS, { consolidated: true }).totalExpenseCents).toBe(0);
+    expect(buildPnl(lines, MONTHS, { catalog: CATEGORIES }).totalExpenseCents).toBe(cents(500));
+    expect(buildPnl(lines, MONTHS, { catalog: CATEGORIES, consolidated: true }).totalExpenseCents).toBe(0);
   });
 
   it('ignores months outside the range asked for', () => {
-    const pnl = buildPnl([line('2025-12', 'rental_income', 9_999), line('2026-06', 'rental_income', 100)], MONTHS);
+    const pnl = buildPnl([line('2025-12', 'rental_income', 9_999), line('2026-06', 'rental_income', 100)], MONTHS, { catalog: CATEGORIES });
     expect(pnl.totalIncomeCents).toBe(cents(100));
   });
 
   it('sorts the biggest lines to the top', () => {
     const pnl = buildPnl(
       [line('2026-06', 'lawn', -100), line('2026-06', 'electric', -900), line('2026-06', 'trash', -300)],
-      MONTHS,
+      MONTHS, { catalog: CATEGORIES },
     );
     expect(pnl.expenses.map((r) => r.categoryKey)).toEqual(['electric', 'trash', 'lawn']);
   });

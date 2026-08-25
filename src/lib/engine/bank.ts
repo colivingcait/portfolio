@@ -170,7 +170,7 @@ export interface PeriodTotals {
 
 export function periodTotals(
   transactions: readonly ClassifiedTransaction[],
-  catalog?: CategoryCatalog,
+  catalog: CategoryCatalog,
 ): PeriodTotals {
   const byCategory: Record<string, Cents> = {};
   let income = 0;
@@ -210,7 +210,7 @@ export function periodTotals(
  */
 export function ruleFromConfirmation(
   input: { description: string; categoryKey: string; bankAccountId: string | null },
-  catalog?: CategoryCatalog,
+  catalog: CategoryCatalog,
 ): Omit<PayeeRule, 'id'> {
   if (!category(input.categoryKey, catalog)) {
     throw new Error(`Unknown category: ${input.categoryKey}`);

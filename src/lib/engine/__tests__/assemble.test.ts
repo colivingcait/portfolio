@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { assemblePropertyRollup, debtServiceDisagreement, deriveFromBank } from '../assemble';
 import { classify, periodTotals, type PayeeRule, type RawTransaction } from '../bank';
+import { CATEGORIES } from '../categories';
 import { cents } from '../money';
 
 const rules: PayeeRule[] = [
@@ -13,7 +14,7 @@ const rules: PayeeRule[] = [
 ];
 
 function totalsFor(transactions: RawTransaction[]) {
-  return periodTotals(classify(transactions, rules, null));
+  return periodTotals(classify(transactions, rules, null), CATEGORIES);
 }
 
 describe('deriving buckets from a bank period', () => {
@@ -22,7 +23,7 @@ describe('deriving buckets from a bank period', () => {
       totalsFor([
         { date: '2026-06-01', description: 'RENT UNIT A', amountCents: cents(1_850) },
         { date: '2026-06-02', description: 'PADSPLIT HOST PAYOUT', amountCents: cents(5_100) },
-      ]),
+      ]), CATEGORIES,
     );
     // A PadSplit deposit is revenue the platform already recognised. Counting
     // it here would double-count it once the PadSplit import lands.
@@ -35,7 +36,7 @@ describe('deriving buckets from a bank period', () => {
       totalsFor([
         { date: '2026-06-05', description: 'GEORGIA POWER', amountCents: cents(-320) },
         { date: '2026-06-06', description: 'MORTGAGE PAYMENT', amountCents: cents(-1_137.72) },
-      ]),
+      ]), CATEGORIES,
     );
     expect(derived.ownerPaidOpexCents).toBe(cents(320));
     expect(derived.categorizedDebtServiceCents).toBe(cents(1_137.72));
@@ -46,7 +47,7 @@ describe('deriving buckets from a bank period', () => {
       totalsFor([
         { date: '2026-06-01', description: 'DEPOSIT HELD', amountCents: cents(1_850) },
         { date: '2026-06-07', description: 'TRANSFER TO SAVINGS', amountCents: cents(-2_000) },
-      ]),
+      ]), CATEGORIES,
     );
     expect(derived.revenueCents).toBe(0);
     expect(derived.ownerPaidOpexCents).toBe(0);
@@ -55,7 +56,7 @@ describe('deriving buckets from a bank period', () => {
 
   it('ignores uncategorized rows rather than guessing which bucket they belong in', () => {
     const derived = deriveFromBank(
-      totalsFor([{ date: '2026-06-09', description: 'MYSTERY VENDOR', amountCents: cents(-145) }]),
+      totalsFor([{ date: '2026-06-09', description: 'MYSTERY VENDOR', amountCents: cents(-145) }]), CATEGORIES,
     );
     expect(derived.ownerPaidOpexCents).toBe(0);
   });
@@ -68,7 +69,7 @@ describe('assembling a direct property month', () => {
       { date: '2026-06-01', description: 'RENT UNIT B', amountCents: cents(1_650) },
       { date: '2026-06-05', description: 'GEORGIA POWER', amountCents: cents(-320) },
       { date: '2026-06-06', description: 'MORTGAGE PAYMENT', amountCents: cents(-1_137.72) },
-    ]),
+    ]), CATEGORIES,
   );
 
   const rollup = assemblePropertyRollup({
@@ -108,7 +109,7 @@ describe('assembling a PM-managed PadSplit month', () => {
     totalsFor([
       { date: '2026-09-04', description: 'PADSPLIT DISBURSEMENT', amountCents: cents(6_900) },
       { date: '2026-09-05', description: 'GEORGIA POWER', amountCents: cents(-420) },
-    ]),
+    ]), CATEGORIES,
   );
 
   const rollup = assemblePropertyRollup({

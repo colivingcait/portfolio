@@ -14,6 +14,7 @@ import {
   type PayeeRule,
 } from './engine/bank';
 import { category, oppositeCategory } from './engine/categories';
+import { getCategoryCatalog } from './categories-queries';
 import { suggestPayee } from './import/payee';
 import { monthOf } from './engine/dates';
 
@@ -406,7 +407,10 @@ export async function confirmTransaction(
    */
   scope: RuleScope = 'account',
 ): Promise<{ ok: boolean; error?: string; ruleCreated?: boolean; alsoCategorized?: number }> {
-  if (!category(categoryKey)) return { ok: false, error: `Unknown category: ${categoryKey}` };
+  // The merged catalog, not the built-ins: a category added in Settings is
+  // offered by the picker and must be accepted by the thing the picker feeds.
+  const catalog = await getCategoryCatalog();
+  if (!category(categoryKey, catalog)) return { ok: false, error: `Unknown category: ${categoryKey}` };
 
   const transaction = await prisma.bankTransaction.findUnique({
     where: { id: transactionId },

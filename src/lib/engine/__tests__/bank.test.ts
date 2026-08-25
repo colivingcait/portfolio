@@ -13,7 +13,7 @@ import {
   type PayeeRule,
   type RawTransaction,
 } from '../bank';
-import { affectsPnl, isIntercompany } from '../categories';
+import { CATEGORIES, affectsPnl, isIntercompany } from '../categories';
 import { cents } from '../money';
 
 const ACCOUNT = 'acct:candace';
@@ -97,14 +97,14 @@ describe('payee rules (§7)', () => {
       description: 'ACH DEBIT SOME NEW VENDOR LLC 06/09 #883120',
       categoryKey: 'lawn',
       bankAccountId: ACCOUNT,
-    });
+    }, CATEGORIES);
     expect(rule.match).toBe('ACH DEBIT SOME NEW VENDOR LLC');
     expect(rule.categoryKey).toBe('lawn');
   });
 
   it('refuses to learn a rule for a category that does not exist', () => {
     expect(() =>
-      ruleFromConfirmation({ description: 'X', categoryKey: 'not_a_category', bankAccountId: null }),
+      ruleFromConfirmation({ description: 'X', categoryKey: 'not_a_category', bankAccountId: null }, CATEGORIES),
     ).toThrow();
   });
 
@@ -126,7 +126,7 @@ describe('categories that need care (§7)', () => {
           { id: 'b', bankAccountId: null, match: 'DEPOSIT HELD', categoryKey: 'security_deposit_received' },
         ],
         null,
-      ),
+      ), CATEGORIES,
     );
     expect(totals.incomeCents).toBe(cents(1_600));
     expect(totals.excludedCents).toBe(cents(1_600));
@@ -139,28 +139,28 @@ describe('categories that need care (§7)', () => {
         [{ date: '2026-06-30', description: 'DEPOSIT REFUND', amountCents: cents(-1_600) }],
         [{ id: 'a', bankAccountId: null, match: 'DEPOSIT REFUND', categoryKey: 'security_deposit_returned' }],
         null,
-      ),
+      ), CATEGORIES,
     );
     expect(totals.expenseCents).toBe(0);
     expect(totals.depositsHeldDeltaCents).toBe(cents(-1_600));
   });
 
   it('lets a foreign charge be flagged rather than force-assigned to the property', () => {
-    expect(affectsPnl('not_portfolio')).toBe(false);
+    expect(affectsPnl('not_portfolio', CATEGORIES)).toBe(false);
     const totals = periodTotals(
       classify(
         [{ date: '2026-06-14', description: 'AUTOPAY WRONG CARD', amountCents: cents(-210) }],
         [{ id: 'a', bankAccountId: null, match: 'AUTOPAY WRONG CARD', categoryKey: 'not_portfolio' }],
         null,
-      ),
+      ), CATEGORIES,
     );
     expect(totals.expenseCents).toBe(0);
     expect(totals.excludedCents).toBe(cents(-210));
   });
 
   it('marks an operator management fee as intercompany so it is not both a cost and a receipt', () => {
-    expect(isIntercompany('operator_management_fee')).toBe(true);
-    expect(isIntercompany('maintenance_repairs')).toBe(false);
+    expect(isIntercompany('operator_management_fee', CATEGORIES)).toBe(true);
+    expect(isIntercompany('maintenance_repairs', CATEGORIES)).toBe(false);
   });
 
   it('nets income against expense for the period', () => {
@@ -177,7 +177,7 @@ describe('categories that need care (§7)', () => {
           { id: 'c', bankAccountId: null, match: 'TRANSFER TO SAVINGS', categoryKey: 'transfer_between_own_accounts' },
         ],
         null,
-      ),
+      ), CATEGORIES,
     );
     expect(totals.incomeCents).toBe(cents(5_100));
     expect(totals.expenseCents).toBe(cents(320));

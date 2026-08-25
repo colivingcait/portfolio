@@ -61,7 +61,7 @@ function emptyByMonth(months: readonly MonthKey[]): Record<MonthKey, Cents> {
 export function buildPnl(
   lines: readonly LedgerLine[],
   months: readonly MonthKey[],
-  options: { catalog?: CategoryCatalog; consolidated?: boolean } = {},
+  options: { catalog: CategoryCatalog; consolidated?: boolean },
 ): PnlReport {
   const inRange = lines.filter((line) => months.includes(line.month));
 

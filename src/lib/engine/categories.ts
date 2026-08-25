@@ -168,37 +168,38 @@ export const CATEGORIES: CategoryDef[] = [
   { key: 'other_expense', taxTreatment: 'deductible', taxLine: 'other', label: 'Other', class: 'expense' },
 ];
 
-const BY_KEY = new Map(CATEGORIES.map((c) => [c.key, c]));
-
 /**
  * The categories in play.
  *
- * Defaults to the built-ins. Anywhere that can see the database passes a
- * merged catalog instead, so a category someone added themselves behaves
- * exactly like one shipped in code — including at year end.
+ * Always passed explicitly, never defaulted. It used to be optional, falling
+ * back to the built-ins, and a single caller that forgot it rejected every
+ * category anyone had added themselves — a rule for a new Phone category came
+ * back "Unknown category: phone" while the picker offered it happily. A
+ * default that is right almost everywhere is worse than no default: the one
+ * place it is wrong fails silently and looks like the user's mistake. Pass
+ * CATEGORIES where the built-ins really are what is meant.
  */
 export type CategoryCatalog = readonly CategoryDef[];
 
-export function category(key: string, catalog?: CategoryCatalog): CategoryDef | null {
-  if (!catalog) return BY_KEY.get(key) ?? null;
+export function category(key: string, catalog: CategoryCatalog): CategoryDef | null {
   return catalog.find((definition) => definition.key === key) ?? null;
 }
 
-export function isIncome(key: string, catalog?: CategoryCatalog): boolean {
+export function isIncome(key: string, catalog: CategoryCatalog): boolean {
   return category(key, catalog)?.class === 'income';
 }
 
-export function isExpense(key: string, catalog?: CategoryCatalog): boolean {
+export function isExpense(key: string, catalog: CategoryCatalog): boolean {
   return category(key, catalog)?.class === 'expense';
 }
 
 /** Excluded from the P&L: deposits held, transfers, owner cash, foreign charges. */
-export function affectsPnl(key: string, catalog?: CategoryCatalog): boolean {
+export function affectsPnl(key: string, catalog: CategoryCatalog): boolean {
   const def = category(key, catalog);
   return def !== null && !def.excludeFromPnl;
 }
 
-export function isIntercompany(key: string, catalog?: CategoryCatalog): boolean {
+export function isIntercompany(key: string, catalog: CategoryCatalog): boolean {
   return category(key, catalog)?.intercompany === true;
 }
 
@@ -222,16 +223,16 @@ export function keyFromLabel(label: string): string {
     .slice(0, 40);
 }
 
-export function taxLineFor(key: string, catalog?: CategoryCatalog): ScheduleELine | null {
+export function taxLineFor(key: string, catalog: CategoryCatalog): ScheduleELine | null {
   return category(key, catalog)?.taxLine ?? null;
 }
 
-export function taxTreatmentFor(key: string, catalog?: CategoryCatalog): TaxTreatment | null {
+export function taxTreatmentFor(key: string, catalog: CategoryCatalog): TaxTreatment | null {
   return category(key, catalog)?.taxTreatment ?? null;
 }
 
 /** Spend that is depreciated rather than deducted in the year it happened. */
-export function isCapitalizable(key: string, catalog?: CategoryCatalog): boolean {
+export function isCapitalizable(key: string, catalog: CategoryCatalog): boolean {
   return category(key, catalog)?.taxTreatment === 'capitalizable';
 }
 

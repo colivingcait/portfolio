@@ -97,7 +97,7 @@ export interface ScheduleEInput {
   escrowTaxCents?: Cents;
   escrowInsuranceCents?: Cents;
   /** Built-ins plus anything added later. */
-  catalog?: CategoryCatalog;
+  catalog: CategoryCatalog;
 }
 
 export function buildScheduleE(input: ScheduleEInput): ScheduleEReport {
