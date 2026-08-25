@@ -4,6 +4,7 @@ import { PortfolioTabs } from '@/components/PortfolioTabs';
 import { Badge, Empty, Explainer, Money, Note, PageHeader, Panel, Pct, Td, Th } from '@/components/ui';
 import { formatCents } from '@/lib/engine/money';
 import { Legend, LineChart, RAMP, Sparkline, StackedBar, seriesColor } from '@/components/charts';
+import { HouseStrip, count, latestOf, money, percent, type Metric } from '@/components/HouseStrip';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,6 +36,52 @@ export default async function OperationsPage({
   const roomsTotal = sum((r) => r.roomsTotal);
   const netBilled = sum((r) => r.netBilledCents);
   const gross = sum((r) => r.grossCollectedCents);
+
+  // Each house's own series, one entry per metric. Nulls are gaps rather than
+  // zeroes: a house with no data for a month did not earn nothing that month,
+  // it simply was not there yet.
+  const metricsFor = (house: string): Metric[] => {
+    const own = data.history.filter((row) => row.propertyName === house);
+    const at = (month: string) => own.find((row) => row.earningsMonth === month) ?? null;
+    const series = (pick: (row: (typeof own)[number]) => number | null) =>
+      data.months.map((month) => ({ label: month, value: at(month) === null ? null : pick(at(month)!) }));
+
+    const earnings = series((row) => row.hostEarningsCents);
+    const collected = series((row) => row.grossCollectedCents);
+    // Fees arrive negative; a chart of what was kept reads better positive.
+    const fees = series((row) => -row.feesCents);
+    const occupancy = series((row) => row.metrics.occupancyRate);
+    const turnover = series((row) => row.turnovers);
+    const collection = series((row) => row.metrics.collectionRate);
+
+    const latestRow = [...own].reverse()[0] ?? null;
+    const feeShare =
+      latestRow && latestRow.grossCollectedCents > 0
+        ? `${((-latestRow.feesCents / latestRow.grossCollectedCents) * 100).toFixed(0)}% of what was collected`
+        : undefined;
+
+    return [
+      { label: 'Host earnings', points: earnings, format: money, latest: latestOf(earnings, money) },
+      { label: 'Collected', points: collected, format: money, latest: latestOf(collected, money) },
+      { label: 'PadSplit kept', points: fees, format: money, latest: latestOf(fees, money), hint: feeShare },
+      { label: 'Occupancy', points: occupancy, format: percent, latest: latestOf(occupancy, percent) },
+      {
+        label: 'Turnovers',
+        points: turnover,
+        format: count,
+        latest: latestOf(turnover, count),
+        tone: (latestRow?.turnovers ?? 0) > 2 ? 'bad' : 'muted',
+        hint: 'Rooms that changed hands. Every one costs a booking fee.',
+      },
+      {
+        label: 'Collection rate',
+        points: collection,
+        format: percent,
+        latest: latestOf(collection, percent),
+        hint: 'Blank while a month is still collecting.',
+      },
+    ];
+  };
 
   // Colour follows the house, fixed across every chart, so filtering one out
   // never repaints the others.
@@ -182,59 +229,77 @@ export default async function OperationsPage({
       </Panel>
 
       <Panel
-        title="What each room earns"
-        description="Host earnings per room per month. A house-wide median hid the thing worth seeing: rooms in the same house differ by hundreds a month, and the ones that turn over most are the ones that earn least."
+        title="Each house, month by month"
+        description="Every measure for a house in one band. The money, then how full it was and how often it changed hands — the two that usually explain the money."
       >
-        <div className="overflow-x-auto">
-          <table>
-            <thead>
-              <tr>
-                <Th>Room</Th>
-                <Th>Over {data.months.length} months</Th>
-                <Th right>Median</Th>
-                <Th right>People</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.rooms.map((room, index) => {
-                const previous = data.rooms[index - 1];
-                const newHouse = !previous || previous.propertyName !== room.propertyName;
-                const colour = seriesColor(
-                  [...new Set(data.rooms.map((r) => r.propertyName))].indexOf(room.propertyName),
-                );
-                return (
-                  <tr key={`${room.propertyId}-${room.roomNumber}`} className={newHouse ? 'border-t border-line' : ''}>
-                    <Td>
-                      {newHouse ? (
-                        <div className="mb-0.5 text-[11px] font-medium text-muted">{room.propertyName}</div>
-                      ) : null}
-                      <span className="pl-1">Room {room.roomNumber}</span>
-                    </Td>
-                    <Td>
-                      <Sparkline
-                        points={room.byMonth.map((value, i) => ({ label: data.months[i], value }))}
-                        color={colour}
-                        width={320}
-                        height={34}
-                        format={(v) => formatCents(v)}
-                      />
-                    </Td>
-                    <Td right>
-                      {room.medianCents === null ? <span className="num text-muted">—</span> : <Money cents={room.medianCents} />}
-                    </Td>
-                    <Td right>
-                      <span
-                        className={room.people >= 5 ? 'num text-bad' : room.people >= 3 ? 'num text-warn' : 'num text-muted'}
-                        title={`${room.people} different people in this room across ${data.months.length} months`}
-                      >
-                        {room.people}
-                      </span>
-                    </Td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="space-y-6">
+          {houseNames.map((house, index) => (
+            <HouseStrip key={house} name={house} color={seriesColor(index)} metrics={metricsFor(house)} />
+          ))}
+        </div>
+      </Panel>
+
+      <Panel
+        title="What each room earns"
+        description="Host earnings per room, month by month. Grouped by house, because the comparison that matters is between rooms under the same roof: they differ by hundreds a month, and the ones that turn over most earn least."
+      >
+        <div className="space-y-5">
+          {houseNames.map((house, houseIndex) => {
+            const own = data.rooms.filter((room) => room.propertyName === house);
+            if (own.length === 0) return null;
+            const colour = seriesColor(houseIndex);
+            const earning = own.filter((room) => room.medianCents !== null).map((room) => room.medianCents as number);
+            const best = earning.length ? Math.max(...earning) : 0;
+
+            return (
+              <div key={house}>
+                <div className="mb-2 flex items-baseline justify-between border-b border-line pb-1.5">
+                  <span className="flex items-center gap-2 text-[13px] font-medium">
+                    <span className="inline-block h-2 w-2 rounded-[2px]" style={{ background: colour }} />
+                    {house}
+                  </span>
+                  <span className="text-[11px] text-muted">
+                    {own.length} rooms · best {formatCents(best)} a month
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-x-5 gap-y-3 sm:grid-cols-3 xl:grid-cols-4">
+                  {own.map((room) => (
+                    <div key={room.roomNumber} className="rounded-md border border-line px-2.5 py-2">
+                      <div className="flex items-baseline justify-between">
+                        <span className="text-[12px]">Room {room.roomNumber}</span>
+                        <span
+                          className={`text-[11px] ${room.people >= 4 ? 'text-bad' : room.people >= 3 ? 'text-warn' : 'text-muted'}`}
+                          title={`${room.people} ${room.people === 1 ? 'person' : 'different people'} across ${data.months.length} months`}
+                        >
+                          {room.people} {room.people === 1 ? 'person' : 'people'}
+                        </span>
+                      </div>
+                      <div className="mt-1">
+                        <Sparkline
+                          points={room.byMonth.map((value, i) => ({ label: data.months[i], value }))}
+                          color={colour}
+                          width={168}
+                          height={30}
+                          format={(v) => formatCents(v)}
+                        />
+                      </div>
+                      <div className="mt-0.5 flex items-baseline justify-between">
+                        <span className="num text-[12px]">
+                          {room.medianCents === null ? '—' : formatCents(room.medianCents)}
+                        </span>
+                        {room.medianCents !== null && best > 0 && room.medianCents < best * 0.7 ? (
+                          <span className="text-[10px] text-warn">
+                            {formatCents(best - room.medianCents)} under
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </Panel>
 
