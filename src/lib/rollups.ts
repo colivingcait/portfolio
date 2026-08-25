@@ -27,6 +27,8 @@ export async function recomputePropertyMonth(propertyId: string, month: MonthKey
         where: {
           statement: { bankAccountId: { in: accountIds }, status: 'posted' },
           date: { gte: new Date(`${monthStart(month)}T00:00:00.000Z`), lte: new Date(`${monthEnd(month)}T00:00:00.000Z`) },
+          // A row that was split is a container; its pieces carry the money.
+          splits: { none: {} },
         },
       })
     : [];

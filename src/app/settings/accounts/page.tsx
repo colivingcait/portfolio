@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db';
 import { getSelectOptions } from '@/lib/queries';
 import { RecordForm } from '@/components/RecordForm';
 import { DeleteButton } from '@/components/DeleteButton';
-import { Empty, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
+import { Empty, Explainer, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
 import { withOptions } from '../_shared/helpers';
 
 export const dynamic = 'force-dynamic';
@@ -25,6 +25,17 @@ export default async function AccountsPage() {
         subtitle="Each property has its own bank account, and everything for that property moves in and out through it. This is the single most important structural fact in the build: on import, the file is the property."
       />
 
+
+      <Explainer title="Why this matters">
+        One account per property is the structural fact the whole import rests on: when you drag a statement in,
+        the file <em>is</em> the property, so nothing has to be assigned by hand.
+        <div className="mt-1.5">
+          The <strong>last four digits</strong> are what route an uploaded file to the right account with no typing, so
+          they are worth filling in. An account with no statement imported shows as a zero balance on the balance
+          sheet — a confident-looking zero that is really a gap, which is why it gets flagged there rather than
+          silently totalled.
+        </div>
+      </Explainer>
       {withoutAccount.length > 0 ? (
         <Note>
           No account yet for {withoutAccount.map((p) => p.name).join(', ')}. Statement import needs one per property —

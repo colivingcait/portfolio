@@ -495,11 +495,24 @@ model BankTransaction {
   matchedRuleId       String?
   /// True once a human has confirmed the category in the review list.
   confirmed           Boolean  @default(false)
+  /// A note for later. One line on a statement rarely says what it was for.
+  memo                String?
 
-  statement BankStatement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  /// Set on the pieces of a split. One charge covering two things — supplies
+  /// and a capital improvement on the same Home Depot receipt — is kept whole
+  /// so the statement still ties, and the pieces carry the categories.
+  ///
+  /// The rule everywhere else: a row counts toward the books only if nothing
+  /// was split out of it. A parent with pieces is a container, not an entry.
+  splitParentId String?
+
+  statement   BankStatement     @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  splitParent BankTransaction?  @relation("TransactionSplit", fields: [splitParentId], references: [id], onDelete: Cascade)
+  splits      BankTransaction[] @relation("TransactionSplit")
 
   @@index([statementId, date])
   @@index([categoryKey])
+  @@index([splitParentId])
 }
 
 /// Substring match on description → category. The rule table is what stops

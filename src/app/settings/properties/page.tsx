@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db';
 import { getSelectOptions } from '@/lib/queries';
 import { RecordForm } from '@/components/RecordForm';
 import { DeleteButton } from '@/components/DeleteButton';
-import { Badge, Empty, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
+import { Badge, Empty, Explainer, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
 import { withOptions } from '../_shared/helpers';
 
 export const dynamic = 'force-dynamic';
@@ -24,6 +24,18 @@ export default async function PropertiesPage() {
         subtitle="Four attributes vary and the engine branches on them: revenue source, unit structure, management (as a period of time, not a flag) and the entity holding title."
       />
 
+
+      <Explainer title="Why this matters">
+        Four things here change how every number for a house is computed: where revenue comes from, whether
+        it is rented by the room or the unit, who manages it, and which entity holds title. They are not labels —
+        the engine branches on them.
+        <div className="mt-1.5">
+          <strong>Purchase price</strong> and <strong>cash invested</strong> are two different figures and both matter.
+          Purchase price is the starting point for basis and what a balance sheet carries at cost. Cash invested is the
+          money that actually left your pocket — deposit, closing costs, rehab — and it is the denominator of
+          cash-on-cash. Financing the rest is the whole point, so they should not match.
+        </div>
+      </Explainer>
       {unverified > 0 ? (
         <Note>
           {unverified} {unverified === 1 ? 'property is' : 'properties are'} unverified. The coliving rows in the build

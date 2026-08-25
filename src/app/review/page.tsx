@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/db';
 import { getCategoryOptions } from '@/lib/categories-queries';
-import { Empty, Note, PageHeader, Panel, Th } from '@/components/ui';
+import { Empty, Explainer, Note, PageHeader, Panel, Th } from '@/components/ui';
+import { BooksTabs } from '@/components/BooksTabs';
 import { ReviewRow } from '@/components/ReviewRow';
 import { findReversals } from '@/lib/engine/bank';
 import { requireIsoDate } from '@/lib/mappers';
@@ -83,6 +84,20 @@ export default async function ReviewPage() {
         title="Review"
         subtitle="Unmatched bank transactions only. No two lines from the same vendor read alike — the dates, trace numbers and order references all change — so each row shows the stable fragment a rule should match on, and how many other rows it would catch. Edit it if it grabbed the wrong part."
       />
+
+      <BooksTabs />
+
+      <Explainer title="What this is and why it matters">
+        The inbox. Only bank lines that no rule recognised land here, and each one you confirm teaches a rule so the
+        same payee never asks twice. After two months this list should be a handful of one-offs a month; if it stays
+        long, the <Link href="/settings/rules" className="underline">rule table</Link> needs work.
+        <div className="mt-1.5">
+          Nothing here is in any report yet. An uncategorized row is money that moved and has not been accounted for,
+          so a profit and loss with rows sitting here is incomplete — and it will look finished either way, which is
+          exactly the danger. To revise something already categorized, use the{' '}
+          <Link href="/books" className="underline">register</Link> instead.
+        </div>
+      </Explainer>
 
       {unmatched.length === 0 ? (
         <Panel>

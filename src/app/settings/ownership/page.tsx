@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db';
 import { getOwnershipContext, getSelectOptions, todayIso } from '@/lib/queries';
 import { DeleteButton } from '@/components/DeleteButton';
 import { OwnershipSplitForm } from '@/components/OwnershipSplitForm';
-import { Badge, Empty, Note, PageHeader, Panel, Pct, Td, Th } from '@/components/ui';
+import { Badge, Empty, Explainer, Note, PageHeader, Panel, Pct, Td, Th } from '@/components/ui';
 import { effectiveShare } from '@/lib/engine/ownership';
 
 export const dynamic = 'force-dynamic';
@@ -41,6 +41,17 @@ export default async function OwnershipPage() {
         subtitle="A graph, not a field. Effective share is the sum, over every path from you to a property, of the product of the percentages along that path — so half of a property held by an entity you half-own is a quarter."
       />
 
+
+      <Explainer title="Why this matters">
+        This is a graph, not a field, and that is what makes it worth entering carefully. Your effective share
+        of a house is the sum, over every path from you to it, of the percentages multiplied along the way — so half of
+        a property held by an entity you half-own is a quarter, and two paths to the same house add up.
+        <div className="mt-1.5">
+          <strong>Equity</strong> and <strong>distribution</strong> are recorded separately on purpose. Who owns a
+          thing and who gets this month&apos;s cash are often not the same split, especially where one partner funded
+          more than their share. Payouts follows the distribution basis; equity and sale proceeds follow the other.
+        </div>
+      </Explainer>
       {!context.viewerId ? (
         <Note tone="bad">
           No entity is marked as you, so no effective share can be computed. Set “This is me” on your own entity in{' '}

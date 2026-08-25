@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { getYearReport } from '@/lib/reports-queries';
-import { Badge, Empty, Money, Note, PageHeader, Panel, Pct, Td, Th } from '@/components/ui';
+import { Badge, Empty, Explainer, Money, Note, PageHeader, Panel, Pct, Td, Th } from '@/components/ui';
+import { BooksTabs } from '@/components/BooksTabs';
 import { ExportButton } from '@/components/ExportButton';
 import { formatCents } from '@/lib/engine/money';
 import { mappingTable } from '@/lib/engine/tax';
@@ -56,6 +57,20 @@ export default async function ReportsPage({
           </div>
         }
       />
+
+      <BooksTabs />
+
+      <Explainer title="What this is and why it matters">
+        The pack an accountant actually wants: Schedule E lines with the operational categories rolled into them, plus
+        the return figures a lender or partner asks for. Everything here is derived — nothing on this page is typed in,
+        so it cannot drift from the register.
+        <div className="mt-1.5">
+          Mortgage interest comes off the amortization schedules rather than off a bank line, because a statement shows
+          one undivided payment and only the interest half is deductible. Capital spend is listed separately and is NOT
+          in the expense total: it is depreciated, and setting up that schedule is your accountant&apos;s job, not this
+          tool&apos;s.
+        </div>
+      </Explainer>
 
       <div className="mb-4 flex flex-wrap items-center gap-2 text-[13px]">
         <Link href={`/reports?year=${year}`} className={`rounded-md px-2.5 py-1 ${!entityId ? 'bg-surface-2' : 'text-muted hover:text-text'}`}>

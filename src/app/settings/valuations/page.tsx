@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db';
 import { getSelectOptions, todayIso } from '@/lib/queries';
 import { RecordForm } from '@/components/RecordForm';
 import { DeleteButton } from '@/components/DeleteButton';
-import { Badge, Empty, Money, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
+import { Badge, Empty, Explainer, Money, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
 import { fieldsFor } from '../_shared/helpers';
 import { SOURCE_CONFIDENCE, valuationAge, type ValuationSource } from '@/lib/engine/equity';
 import { requireIsoDate } from '@/lib/mappers';
@@ -37,6 +37,15 @@ export default async function ValuationsPage() {
         subtitle="What each property is worth, and where that number came from. Estimates are dated rather than overwritten, so the history is kept and a value can be read as of any month."
       />
 
+
+      <Explainer title="Why this matters">
+        Estimates are dated rather than overwritten, so the history stays intact and any month can be read as of
+        that month. Overwriting would make last year&apos;s equity silently restate itself.
+        <div className="mt-1.5">
+          A property with no valuation is carried at cost on the balance sheet, and at zero if there is no cost either —
+          which understates everything. Cap rate needs a value too; without one it cannot be computed at all.
+        </div>
+      </Explainer>
       {withoutValue.length > 0 ? (
         <Note>
           No estimate yet for {withoutValue.map((p) => p.name).join(', ')}. Their debt still counts against portfolio

@@ -2,7 +2,7 @@ import { prisma } from '@/lib/db';
 import { getCategoryCatalog } from '@/lib/categories-queries';
 import { CATEGORIES } from '@/lib/engine/categories';
 import { CategoryEditor } from '@/components/CategoryEditor';
-import { Badge, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
+import { Badge, Explainer, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
 import { SCHEDULE_E_LINES } from '@/lib/engine/tax';
 
 export const dynamic = 'force-dynamic';
@@ -43,6 +43,17 @@ export default async function CategoriesPage() {
         subtitle="One account per property means the file is the property, so the hard half of classification is already answered. Only what kind remains: one dimension, a small vocabulary, and it grows when you need it to."
       />
 
+
+      <Explainer title="Why this matters">
+        You categorize by what happened — lawn, pest control, home warranty. The tax treatment rides along
+        underneath, so a Schedule E line is never something you have to think about while doing the monthly work.
+        <div className="mt-1.5">
+          Add categories freely; a new one needs no code change. What matters is the <strong>tax line</strong> you map
+          it to, since that is where the money lands on a return. When in doubt, repairs and cleaning are the usual
+          homes for a running cost, and anything that extends the life of the property belongs under capex — that gets
+          depreciated rather than deducted, and your accountant sets that up.
+        </div>
+      </Explainer>
       <Panel
         title="Add a category"
         description="Name it the way you think about it. Where it lands on a tax return is chosen once, here, and never asked again while you are categorizing."

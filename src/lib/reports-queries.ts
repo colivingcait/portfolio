@@ -53,7 +53,12 @@ export async function getYearReport(year: number, entityId?: string | null) {
       }),
       prisma.bankAccount.findMany(),
       prisma.bankTransaction.findMany({
-        where: { statement: { status: 'posted' }, date: { gte: new Date(`${year}-01-01T00:00:00Z`), lte: new Date(`${year}-12-31T00:00:00Z`) } },
+        where: {
+          statement: { status: 'posted' },
+          date: { gte: new Date(`${year}-01-01T00:00:00Z`), lte: new Date(`${year}-12-31T00:00:00Z`) },
+          // A split row is a container; its pieces are what get reported.
+          splits: { none: {} },
+        },
         include: { statement: { include: { bankAccount: true } } },
       }),
       prisma.loan.findMany({ include: { payments: true } }),

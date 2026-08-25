@@ -14,7 +14,7 @@ const NAV = [
   { href: '/debt', label: 'Debt' },
   { href: '/payouts', label: 'Payouts' },
   { href: '/equity', label: 'Equity' },
-  { href: '/reports', label: 'Reports' },
+  { href: '/books', label: 'Books' },
   { href: '/imports', label: 'Imports' },
   { href: '/review', label: 'Review' },
   { href: '/settings', label: 'Settings' },

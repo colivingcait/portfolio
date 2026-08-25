@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db';
 import { getSelectOptions } from '@/lib/queries';
 import { RecordForm } from '@/components/RecordForm';
 import { DeleteButton } from '@/components/DeleteButton';
-import { Empty, Money, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
+import { Empty, Explainer, Money, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
 import { withOptions } from '../_shared/helpers';
 
 export const dynamic = 'force-dynamic';
@@ -23,6 +23,17 @@ export default async function LeasesPage() {
         subtitle="Direct properties categorize revenue rather than importing it, so occupancy and delinquency are not derivable from the data alone. A minimal lease record makes expected-versus-received computable and gives them the same vacancy and collection figures the coliving houses get."
       />
 
+
+      <Explainer title="Why this matters">
+        A coliving house gets occupancy and collection figures from the PadSplit export. A directly-rented one has
+        no such source, so without a lease record there is no way to know what <em>should</em> have come in — only what
+        did. A minimal record makes expected-versus-received computable and gives these properties the same vacancy and
+        delinquency figures the others get.
+        <div className="mt-1.5">
+          <strong>Deposit held</strong> earns its place separately: it is a tenant&apos;s money sitting in your account
+          and owed back, so it is a liability on the balance sheet and never income.
+        </div>
+      </Explainer>
       <Note tone="muted">
         Deposits held are a liability, not income — a move-in month would otherwise show phantom revenue and a
         move-out month a phantom loss.

@@ -63,6 +63,7 @@ export async function getPayouts(month: MonthKey): Promise<PayoutsData> {
       where: {
         categoryKey: { in: ['owner_draw', 'owner_contribution'] },
         date: { gte: new Date(`${monthStart(month)}T00:00:00Z`), lte: new Date(`${asOf}T00:00:00Z`) },
+        splits: { none: {} },
       },
       include: { statement: { include: { bankAccount: true } } },
     }),

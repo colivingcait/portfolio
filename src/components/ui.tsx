@@ -90,6 +90,22 @@ export function Badge({ children, tone = 'muted' }: { children: React.ReactNode;
   );
 }
 
+/**
+ * What this screen is and why it matters, above the screen itself.
+ *
+ * A bookkeeping tool is full of forms whose purpose is obvious to whoever
+ * built it and opaque to whoever has to fill them in six months later. Every
+ * one of them says what it is for here.
+ */
+export function Explainer({ title, children }: { title?: string; children: React.ReactNode }) {
+  return (
+    <div className="mb-5 rounded-lg border border-line bg-surface-2/50 px-4 py-3">
+      {title ? <div className="mb-1 text-[12px] font-medium tracking-tight">{title}</div> : null}
+      <div className="text-[12.5px] leading-relaxed text-muted">{children}</div>
+    </div>
+  );
+}
+
 export function Empty({ children }: { children: React.ReactNode }) {
   return <p className="py-6 text-center text-[13px] text-muted">{children}</p>;
 }

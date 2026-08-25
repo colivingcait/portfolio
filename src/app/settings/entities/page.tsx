@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db';
 import { MODELS } from '@/lib/models';
 import { RecordForm } from '@/components/RecordForm';
 import { DeleteButton } from '@/components/DeleteButton';
-import { Badge, Empty, PageHeader, Panel, Td, Th } from '@/components/ui';
+import { Badge, Empty, Explainer, PageHeader, Panel, Td, Th } from '@/components/ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,6 +20,16 @@ export default async function EntitiesPage() {
         subtitle="People and legal entities are the same kind of node in the ownership graph; only the kind distinguishes them. Mark exactly one entity as you — that is the node the “My share” view traverses from."
       />
 
+
+      <Explainer title="Why this matters">
+        Everything else points at these. A property is held by one, a loan is guaranteed by one, an
+        investor who put money in is one. Get an entity wrong and every ownership percentage, distribution and equity
+        figure downstream is wrong with it.
+        <div className="mt-1.5">
+          Mark exactly one as <strong>you</strong>. That is the node the &ldquo;my share&rdquo; figures are computed
+          from — without it the portfolio view can show what the houses did, but not what any of it is worth to you.
+        </div>
+      </Explainer>
       <Panel title="Add an entity">
         <RecordForm modelKey="entity" fields={MODELS.entity.fields} />
       </Panel>

@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db';
 import { getSelectOptions } from '@/lib/queries';
 import { RecordForm } from '@/components/RecordForm';
 import { DeleteButton } from '@/components/DeleteButton';
-import { Empty, Money, PageHeader, Panel, Td, Th } from '@/components/ui';
+import { Empty, Explainer, Money, PageHeader, Panel, Td, Th } from '@/components/ui';
 import { withOptions } from '../_shared/helpers';
 
 export const dynamic = 'force-dynamic';
@@ -36,6 +36,17 @@ export default async function CapitalPage() {
         subtitle="Ownership percent records who owns; it says nothing about who funded. Where contributions have been uneven — one partner covering a repair, another a down payment — this ledger is the only way effective economics stay honest."
       />
 
+
+      <Explainer title="Why this matters">
+        Ownership percent records who <em>owns</em>. It says nothing about who <em>funded</em>, and those come
+        apart the moment one partner covers a repair or a down payment the others do not.
+        <div className="mt-1.5">
+          This ledger is what decides an investor&apos;s claim. A <strong>profit distribution</strong> does not reduce
+          what they are owed back on sale — only capital actually handed back does. Recording a monthly split as a
+          return of capital would quietly wipe out their principal; the Payouts screen checks these entries against
+          what the bank statements show leaving, so the two cannot drift apart unnoticed.
+        </div>
+      </Explainer>
       <Panel title="Add an entry">
         <RecordForm modelKey="capitalAccountEntry" fields={fields} />
       </Panel>

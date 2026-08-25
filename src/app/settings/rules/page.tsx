@@ -3,7 +3,7 @@ import { getSelectOptions } from '@/lib/queries';
 import { RecordForm } from '@/components/RecordForm';
 import { DeleteButton } from '@/components/DeleteButton';
 import { RepairRulesButton } from '@/components/RepairRulesButton';
-import { Badge, Empty, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
+import { Badge, Empty, Explainer, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
 import { withOptions } from '../_shared/helpers';
 import { getCategoryCatalog } from '@/lib/categories-queries';
 import { getRuleHealth } from '@/lib/rules-queries';
@@ -39,6 +39,17 @@ export default async function RulesPage() {
         subtitle="A rule table learns the twenty-odd recurring payees each account sees, so after two months the monthly work is a handful of one-offs. Rules are also written automatically when you confirm a row in Review."
       />
 
+
+      <Explainer title="Why this matters">
+        A rule table is what stops this becoming the experience every other tool gives you: after two months of
+        confirming, the monthly work is a handful of one-offs rather than a full page of guessing.
+        <div className="mt-1.5">
+          Matching is by substring, ignoring case and spacing, so a rule only works if its text survives into next
+          month&apos;s statement. That is why a suggested rule is the vendor name alone and never the whole line — the
+          dates, trace numbers and reference codes around it change every single time. The <strong>catches</strong>
+          column is the check: a rule catching nothing does nothing, however right it looks.
+        </div>
+      </Explainer>
       {dead.length > 0 ? (
         <Note tone={mendable.length > 0 ? 'bad' : 'warn'}>
           {dead.length} rule{dead.length === 1 ? '' : 's'} match nothing on the statements imported so far. A rule
