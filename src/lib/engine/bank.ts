@@ -6,7 +6,7 @@
  * monthly work is a handful of one-offs.
  */
 
-import type { IsoDate } from './dates';
+import { daysBetween, type IsoDate } from './dates';
 import { affectsPnl, category, isExpense, isIncome, type CategoryCatalog } from './categories';
 import { sumCents, type Cents } from './money';
 
@@ -237,4 +237,105 @@ export function normalizePayee(description: string): string {
     .trim()
     .slice(0, 40)
     .trim();
+}
+
+/**
+ * A charge and the reversal that cancels it (§7).
+ *
+ * A fee levied and then refunded is two lines, not one, and the whole question
+ * is whether they end up in the same category. Put both under Bank fee and
+ * their opposite signs cancel: the line ends at what was actually kept.
+ * Categorize the reversal as income instead and the year gains a cost that was
+ * never borne AND income that was never earned — the net is right, every
+ * figure around it is wrong.
+ *
+ * Pairing is by exact opposite amount on the same account, which is
+ * restrictive on its own, plus evidence that the two lines are about the same
+ * thing. Suggested, never applied: only a person can say whether a refund of
+ * last month's fee is a reversal or an unrelated credit that happens to match.
+ */
+export interface ReversalCandidate {
+  /** Index into the transactions passed in. */
+  index: number;
+  /** The row it appears to reverse. */
+  originalIndex: number;
+  daysApart: number;
+  confidence: 'high' | 'medium';
+  /** Words the two lines share, which is what the pairing rests on. */
+  sharedTerms: string[];
+}
+
+/** Words that say a line undoes another one. */
+const REVERSAL_WORDS =
+  /\b(reversal|reversed|reverse|refund|refunded|returned|return|credit\s*adjustment|adjustment|correction|corrected|waived|waiver|rebate|chargeback|charge\s*back|void|voided|cancelled|canceled)\b/i;
+
+/** Words too common to mean two lines are about the same thing. */
+const WEAK_TERMS = new Set([
+  'ach', 'the', 'and', 'for', 'from', 'with', 'payment', 'payments', 'debit', 'credit',
+  'purchase', 'transaction', 'transfer', 'deposit', 'withdrawal', 'online', 'card',
+  'bank', 'account', 'inc', 'llc', 'com', 'www', 'ref', 'usa', 'recurring', 'pending',
+  ...[...REVERSAL_WORDS.source.matchAll(/[a-z]{3,}/g)].map((m) => m[0]),
+]);
+
+function terms(description: string): Set<string> {
+  const words = description
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]+/g, ' ')
+    .split(/\s+/)
+    .filter((word) => word.length >= 3 && /[a-z]/.test(word) && !WEAK_TERMS.has(word));
+  return new Set(words);
+}
+
+export function findReversals(
+  transactions: readonly RawTransaction[],
+  options: { windowDays?: number } = {},
+): ReversalCandidate[] {
+  const windowDays = options.windowDays ?? 90;
+  const termsByIndex = transactions.map((t) => terms(t.description));
+  const taken = new Set<number>();
+  const found: ReversalCandidate[] = [];
+
+  // Earliest first, so a charge is paired with the reversal nearest to it
+  // rather than with a later one that happens to match as well.
+  const order = transactions
+    .map((transaction, index) => ({ transaction, index }))
+    .sort((a, b) => a.transaction.date.localeCompare(b.transaction.date) || a.index - b.index);
+
+  for (let i = 0; i < order.length; i += 1) {
+    const original = order[i];
+    if (taken.has(original.index) || original.transaction.amountCents === 0) continue;
+
+    for (let j = i + 1; j < order.length; j += 1) {
+      const later = order[j];
+      if (taken.has(later.index)) continue;
+      if (later.transaction.amountCents !== -original.transaction.amountCents) continue;
+
+      const daysApart = daysBetween(original.transaction.date, later.transaction.date);
+      if (daysApart > windowDays) break;
+
+      const shared = [...termsByIndex[later.index]].filter((term) => termsByIndex[original.index].has(term));
+      const saysReversal =
+        REVERSAL_WORDS.test(later.transaction.description) || REVERSAL_WORDS.test(original.transaction.description);
+
+      // One shared word is enough where a line says outright that it reverses
+      // something. Without that, two are needed: an equal and opposite amount
+      // sharing a single common word is a coincidence more often than not.
+      const confidence: 'high' | 'medium' | null =
+        saysReversal && shared.length >= 1 ? 'high' : shared.length >= 2 ? 'medium' : null;
+      if (!confidence) continue;
+
+      taken.add(original.index);
+      taken.add(later.index);
+      found.push({
+        index: later.index,
+        originalIndex: original.index,
+        daysApart,
+        confidence,
+        sharedTerms: shared.sort(),
+      });
+      break;
+    }
+  }
+
+  return found.sort((a, b) => a.index - b.index);
 }

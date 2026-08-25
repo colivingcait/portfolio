@@ -3,6 +3,9 @@ import { prisma } from '@/lib/db';
 import { getCategoryOptions } from '@/lib/categories-queries';
 import { Empty, Note, PageHeader, Panel, Th } from '@/components/ui';
 import { ReviewRow } from '@/components/ReviewRow';
+import { findReversals } from '@/lib/engine/bank';
+import { requireIsoDate } from '@/lib/mappers';
+import { formatCents } from '@/lib/engine/money';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,15 +19,63 @@ function suggestionFor(amountCents: number): string {
 }
 
 export default async function ReviewPage() {
-  const [categories, unmatched] = await Promise.all([
+  const [categories, unmatched, everything] = await Promise.all([
     getCategoryOptions(),
     prisma.bankTransaction.findMany({
-    where: { categoryKey: null },
-    include: { statement: { include: { bankAccount: { include: { property: true } } } } },
+      where: { categoryKey: null },
+      include: { statement: { include: { bankAccount: { include: { property: true } } } } },
       orderBy: [{ date: 'desc' }],
       take: 200,
     }),
+    // Reversals are looked for against every row on the account, not just the
+    // unmatched ones: the charge is usually categorized already and the
+    // reversal is the row still sitting here.
+    prisma.bankTransaction.findMany({
+      select: {
+        id: true,
+        date: true,
+        description: true,
+        amountCents: true,
+        categoryKey: true,
+        statement: { select: { bankAccountId: true } },
+      },
+    }),
   ]);
+
+  // Per account, since a fee on one house has nothing to do with a credit of
+  // the same size on another.
+  const byAccount = new Map<string, typeof everything>();
+  for (const transaction of everything) {
+    const list = byAccount.get(transaction.statement.bankAccountId) ?? [];
+    list.push(transaction);
+    byAccount.set(transaction.statement.bankAccountId, list);
+  }
+
+  const reversals = new Map<string, { description: string; date: string; categoryKey: string | null; amountCents: number; confidence: string }>();
+  for (const rows of byAccount.values()) {
+    const pairs = findReversals(
+      rows.map((r) => ({ date: requireIsoDate(r.date), description: r.description, amountCents: r.amountCents })),
+    );
+    for (const pair of pairs) {
+      // Either half can be the one still needing a category.
+      const later = rows[pair.index];
+      const original = rows[pair.originalIndex];
+      reversals.set(later.id, {
+        description: original.description,
+        date: requireIsoDate(original.date),
+        categoryKey: original.categoryKey,
+        amountCents: original.amountCents,
+        confidence: pair.confidence,
+      });
+      reversals.set(original.id, {
+        description: later.description,
+        date: requireIsoDate(later.date),
+        categoryKey: later.categoryKey,
+        amountCents: later.amountCents,
+        confidence: pair.confidence,
+      });
+    }
+  }
 
   return (
     <>
@@ -72,7 +123,21 @@ export default async function ReviewPage() {
                     propertyName={transaction.statement.bankAccount.property.name}
                     description={transaction.description}
                     amountCents={transaction.amountCents}
-                    suggestion={suggestionFor(transaction.amountCents)}
+                    suggestion={
+                      reversals.get(transaction.id)?.categoryKey ?? suggestionFor(transaction.amountCents)
+                    }
+                    reversalOf={
+                      reversals.has(transaction.id)
+                        ? {
+                            description: reversals.get(transaction.id)!.description,
+                            date: reversals.get(transaction.id)!.date,
+                            amount: formatCents(reversals.get(transaction.id)!.amountCents),
+                            categoryLabel:
+                              categories.find((c) => c.key === reversals.get(transaction.id)!.categoryKey)?.label ??
+                              null,
+                          }
+                        : null
+                    }
                   />
                 ))}
               </tbody>

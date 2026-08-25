@@ -13,13 +13,32 @@ interface Props {
   description: string;
   amountCents: number;
   suggestion: string;
+  /** Set where this row looks like it cancels another one, or is cancelled by it. */
+  reversalOf?: {
+    description: string;
+    date: string;
+    amount: string;
+    /** Null where the other half has not been categorized yet either. */
+    categoryLabel: string | null;
+  } | null;
 }
 
-export function ReviewRow({ categories, id, date, propertyName, description, amountCents, suggestion }: Props) {
+export function ReviewRow({
+  categories,
+  id,
+  date,
+  propertyName,
+  description,
+  amountCents,
+  suggestion,
+  reversalOf = null,
+}: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [categoryKey, setCategoryKey] = useState(suggestion);
-  const [createRule, setCreateRule] = useState(true);
+  // A reversal is a one-off, and a rule written from one would catch the next
+  // ordinary charge from the same payee too.
+  const [createRule, setCreateRule] = useState(reversalOf === null);
   // Account-scoped by default: widening a rule is a click, but a rule that has
   // already miscategorized another property's statement is a mess to undo.
   const [scope, setScope] = useState<RuleScope>('account');
@@ -69,6 +88,20 @@ export function ReviewRow({ categories, id, date, propertyName, description, amo
       <td className="border-b border-line/60 px-2 py-2 text-[12px] text-muted">{propertyName}</td>
       <td className="border-b border-line/60 px-2 py-2">
         <div className="text-[12px] leading-snug">{description}</div>
+
+        {reversalOf ? (
+          <div className="mt-1 text-[11px] leading-snug text-warn">
+            Looks like it cancels {reversalOf.amount} on {reversalOf.date} — {reversalOf.description}.{' '}
+            {reversalOf.categoryLabel ? (
+              <>
+                Put it under <strong>{reversalOf.categoryLabel}</strong> as well and the two net to nothing. Categorized
+                as income instead, the year gains a cost never borne and income never earned.
+              </>
+            ) : (
+              <>Give both the same category and their opposite signs cancel.</>
+            )}
+          </div>
+        ) : null}
 
         {createRule ? (
           <div className="mt-1.5 flex flex-wrap items-center gap-2">

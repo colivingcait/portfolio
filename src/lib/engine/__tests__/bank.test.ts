@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  findReversals,
   assertStatementTies,
   checkStatementBalance,
   classify,
@@ -248,5 +249,85 @@ describe('matching is not thrown by whitespace', () => {
   it('matches a rule that itself carries stray whitespace', () => {
     const spaced: PayeeRule[] = [{ id: 'w2', bankAccountId: ACCOUNT, match: '  GAS  SOUTH ', categoryKey: 'gas' }];
     expect(matchRule(spaced, 'ACH DEBIT GAS SOUTH 0731', ACCOUNT)?.id).toBe('w2');
+  });
+});
+
+describe('a charge and the reversal that cancels it', () => {
+  const t = (date: string, description: string, dollars: number): RawTransaction => ({
+    date,
+    description,
+    amountCents: cents(dollars),
+  });
+
+  it('pairs a fee with its reversal', () => {
+    const rows = [
+      t('2026-08-03', 'MONTHLY SERVICE FEE', -35),
+      t('2026-08-09', 'SERVICE FEE REVERSAL', 35),
+    ];
+    const [pair] = findReversals(rows);
+    expect(pair.index).toBe(1);
+    expect(pair.originalIndex).toBe(0);
+    expect(pair.daysApart).toBe(6);
+    expect(pair.confidence).toBe('high');
+    expect(pair.sharedTerms).toEqual(['fee', 'service']);
+  });
+
+  it('pairs a returned payment with the deposit it undoes', () => {
+    const rows = [
+      t('2026-08-02', 'Zelle Payment From Jessica Wood 112233', 1_500),
+      t('2026-08-05', 'Zelle Return Jessica Wood 998877', -1_500),
+    ];
+    expect(findReversals(rows)[0]?.confidence).toBe('high');
+  });
+
+  it('ignores two lines that merely happen to be equal and opposite', () => {
+    // A fee out and rent in at the same figure is a coincidence, not a
+    // reversal, and pairing them would be worse than pairing nothing.
+    const rows = [t('2026-08-03', 'OVERDRAFT FEE', -35), t('2026-08-20', 'GEORGIA POWER REBATE', 35)];
+    expect(findReversals(rows)).toEqual([]);
+  });
+
+  it('needs two shared words where nothing says reversal', () => {
+    const oneWord = [t('2026-08-03', 'DEKALB WATER', -80), t('2026-08-06', 'DEKALB CREDIT', 80)];
+    expect(findReversals(oneWord)).toEqual([]);
+
+    const twoWords = [t('2026-08-03', 'DEKALB WATER SEWER', -80), t('2026-08-06', 'DEKALB WATER ADJ', 80)];
+    expect(findReversals(twoWords)[0]?.confidence).toBe('medium');
+  });
+
+  it('does not reach past the window', () => {
+    const rows = [
+      t('2026-01-03', 'MONTHLY SERVICE FEE', -35),
+      t('2026-08-09', 'SERVICE FEE REVERSAL', 35),
+    ];
+    expect(findReversals(rows)).toEqual([]);
+    expect(findReversals(rows, { windowDays: 400 })).toHaveLength(1);
+  });
+
+  it('pairs each row once, nearest first', () => {
+    // Two identical fees and two reversals must pair up one to one, not all
+    // four to the first one they see.
+    const rows = [
+      t('2026-08-01', 'MONTHLY SERVICE FEE', -35),
+      t('2026-08-02', 'MONTHLY SERVICE FEE', -35),
+      t('2026-08-05', 'SERVICE FEE REVERSAL', 35),
+      t('2026-08-06', 'SERVICE FEE REVERSAL', 35),
+    ];
+    const pairs = findReversals(rows);
+    expect(pairs).toHaveLength(2);
+    expect(pairs.map((p) => [p.originalIndex, p.index])).toEqual([
+      [0, 2],
+      [1, 3],
+    ]);
+  });
+
+  it('finds nothing in a statement with no reversals', () => {
+    const rows = [t('2026-08-01', 'GEORGIA POWER', -140), t('2026-08-04', 'PADSPLIT DEPOSIT', 5_100)];
+    expect(findReversals(rows)).toEqual([]);
+  });
+
+  it('leaves a zero-amount line alone', () => {
+    const rows = [t('2026-08-01', 'SERVICE FEE', 0), t('2026-08-02', 'SERVICE FEE REVERSAL', 0)];
+    expect(findReversals(rows)).toEqual([]);
   });
 });

@@ -159,6 +159,12 @@ export const CATEGORIES: CategoryDef[] = [
     intercompany: true,
     note: 'An expense at property level and income to the recipient. Excluded from consolidated views so it is not counted as both a cost and a receipt (§3).',
   },
+  {
+    key: 'bank_fee', taxTreatment: 'deductible', taxLine: 'other',
+    label: 'Bank fee',
+    class: 'expense',
+    note: 'A fee the bank reverses is categorized here too, on the credit side. The two carry opposite signs, so they cancel and the line ends at what was actually kept.',
+  },
   { key: 'other_expense', taxTreatment: 'deductible', taxLine: 'other', label: 'Other', class: 'expense' },
 ];
 
