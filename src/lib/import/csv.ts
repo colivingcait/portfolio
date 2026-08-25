@@ -69,7 +69,7 @@ const DEBIT_HEADERS = ['debit', 'withdrawal', 'withdrawals', 'money out', 'payme
 const CREDIT_HEADERS = ['credit', 'deposit', 'deposits', 'money in'];
 const BALANCE_HEADERS = ['balance', 'running balance', 'ending balance', 'available balance'];
 
-function findColumn(headers: string[], candidates: string[]): number {
+export function findColumn(headers: string[], candidates: string[]): number {
   const normalized = headers.map((h) => h.trim().toLowerCase());
   // Exact match first — 'amount' should not lose to 'transaction amount type'.
   for (const candidate of candidates) {
