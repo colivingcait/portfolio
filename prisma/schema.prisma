@@ -190,7 +190,6 @@ model Property {
   summaryLines       SummaryLine[]
   billedLines        BilledLine[]
   collectionLines    CollectionLine[]
-  earningsRows       EarningsTableRow[]
   monthlyRollups     MonthlyPropertyRollup[]
   pmStatements       PMStatement[]
 
@@ -292,94 +291,143 @@ model Lease {
 
 model PadSplitImport {
   id            String   @id @default(cuid())
-  earningsMonth String
+  /// summary | billed | collected | earnings_table
+  fileKind      String
   fileName      String
-  fileKind      String // summary | billed | collected | earnings_table
   rowCount      Int
+  /// Months the file touched, comma separated, for showing what it replaced.
+  monthsCovered String
   importedAt    DateTime @default(now())
 
   summaryLines    SummaryLine[]
   billedLines     BilledLine[]
   collectionLines CollectionLine[]
-  earningsRows    EarningsTableRow[]
+  monthTotals     PadSplitMonthTotal[]
 
-  @@index([earningsMonth])
+  @@index([fileKind])
 }
 
+/// One property per earnings month, straight off summary.csv.
+///
+/// Verified against a real export: gross + booking fees = net of booking fees,
+/// + service fees = host earnings, + adjustments = total payout. Every column
+/// is stored rather than derived, so a future export that breaks one of those
+/// identities is visible instead of silently absorbed.
 model SummaryLine {
   id                 String  @id @default(cuid())
   importId           String
   propertyId         String?
-  propertyExternalId String?
+  propertyExternalId String
   earningsMonth      String
+  /// When the money lands, which the file states rather than leaving implied.
+  payoutMonth        String
   grossCents         Int
-  feesCents          Int
+  /// Negative, as exported. Charged when a room is re-let.
+  bookingFeesCents   Int
+  netOfBookingCents  Int
+  /// Negative, as exported. 8% of collections net of booking fees.
+  serviceFeesCents   Int
   hostEarningsCents  Int
+  /// Refunded booking fees and the like: income, but not rent against a bill,
+  /// so it stays out of the collection-rate denominator.
+  adjustmentsCents   Int
+  totalPayoutCents   Int
+  /// The account it was paid into, for matching the deposit on the statement.
+  payoutAccount      String?
 
   import   PadSplitImport @relation(fields: [importId], references: [id], onDelete: Cascade)
   property Property?      @relation(fields: [propertyId], references: [id], onDelete: SetNull)
 
+  @@unique([propertyExternalId, earningsMonth])
   @@index([propertyId, earningsMonth])
+  @@index([payoutMonth])
 }
 
+/// What was charged. The month is the month it was raised — the file has no
+/// month column — and billId is what a collection line joins back to.
 model BilledLine {
-  id                 String  @id @default(cuid())
+  id                 String   @id @default(cuid())
   importId           String
   propertyId         String?
   propertyExternalId String?
   roomExternalId     String?
+  roomNumber         String?
+  memberId           String?
+  memberName         String?
   earningsMonth      String
+  billedDate         DateTime @db.Date
   billType           String
-  kind               String // fee | fine | concession
+  /// membership_dues, promo_room_discount, overdue_balance, and so on.
+  reason             String
+  /// fee | fine | concession, stated by the export rather than inferred.
+  kind               String
   /// As exported: charges negative, concessions positive.
   amountCents        Int
+  billId             String
 
   import   PadSplitImport @relation(fields: [importId], references: [id], onDelete: Cascade)
   property Property?      @relation(fields: [propertyId], references: [id], onDelete: SetNull)
 
+  @@unique([billId])
   @@index([propertyId, earningsMonth])
+  @@index([memberId])
 }
 
+/// What was collected. Joins to a billed line on billId, which is what makes
+/// ageing and per-member balances possible.
 model CollectionLine {
   id                 String   @id @default(cuid())
   importId           String
   propertyId         String?
   propertyExternalId String?
   roomExternalId     String?
+  roomNumber         String?
+  memberId           String?
+  memberName         String?
   billType           String
-  category           String // collected | adjustment
+  /// collected | adjustment, stated by the export.
+  category           String
+  /// Gross collected on this line.
   amountCents        Int
-  /// The export column is labelled "Payout Month" but holds the EARNINGS
-  /// month; it is blank on the in-flight month. Stored raw, and resolved into
-  /// earningsMonth on import via the Created fallback.
+  bookingFeeCents    Int
+  serviceFeeCents    Int
+  hostEarningsCents  Int
+  /// The column is labelled "Payout Month" but holds the EARNINGS month, and
+  /// is blank while that month is still collecting. Stored raw; earningsMonth
+  /// is it where present and the created month where not.
   payoutMonthRaw     String?
   createdDate        DateTime @db.Date
   earningsMonth      String
+  billId             String?
 
   import   PadSplitImport @relation(fields: [importId], references: [id], onDelete: Cascade)
   property Property?      @relation(fields: [propertyId], references: [id], onDelete: SetNull)
 
   @@index([propertyId, earningsMonth])
-  @@index([roomExternalId])
+  @@index([billId])
+  @@index([memberId])
 }
 
-/// Authoritative for credits and payout, over summary.csv — summary understates
-/// credits because unallocated adjustments carry a blank Property ID (§6).
-model EarningsTableRow {
-  id                 String  @id @default(cuid())
-  importId           String
-  propertyId         String?
-  propertyExternalId String?
-  earningsMonth      String
-  grossCents         Int
-  feesCents          Int
-  creditsCents       Int
-  payoutCents        Int
+/// PadSplit's own total for a month across every property — earnings_table.csv.
+///
+/// Not per property, which an earlier model of this got wrong. It earns its
+/// place as a check: the summary rows for a month should add up to it, and on
+/// a real export they do, on all three figures for all eight months.
+model PadSplitMonthTotal {
+  id               String  @id @default(cuid())
+  importId         String
+  earningsMonth    String
+  /// Stated by the file, so which month is still collecting is never guessed.
+  inFlight         Boolean
+  collectionsCents Int
+  /// Booking fees plus service fees. Negative, as exported.
+  expensesCents    Int
+  adjustmentsCents Int
+  payoutCents      Int
 
-  import   PadSplitImport @relation(fields: [importId], references: [id], onDelete: Cascade)
-  property Property?      @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  import PadSplitImport @relation(fields: [importId], references: [id], onDelete: Cascade)
 
-  @@index([propertyId, earningsMonth])
+  @@unique([earningsMonth])
 }
 
 /// A category someone added themselves — pest control, pool service, whatever

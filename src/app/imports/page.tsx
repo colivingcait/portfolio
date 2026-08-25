@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { prisma } from '@/lib/db';
 import { Badge, Empty, Money, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
 import { StatementDropzone } from '@/components/StatementDropzone';
+import { PadSplitDropzone } from '@/components/PadSplitDropzone';
 import { DeleteStatementButton } from '@/components/DeleteStatementButton';
 
 export const dynamic = 'force-dynamic';
@@ -96,9 +97,9 @@ export default async function ImportsPage() {
 
       <Panel
         title="PadSplit"
-        description="Four files per month, keyed by earnings month. Build step 4 — the reconciliation rules are written and tested, the importer around them is not."
+        description="The four-file export, dropped together. Each file is recognised by its own columns, so the names and the order do not matter."
       >
-        {padsplitImports.length === 0 ? <Empty>Nothing imported yet.</Empty> : null}
+        <PadSplitDropzone />
       </Panel>
 
       <Note tone="muted">
