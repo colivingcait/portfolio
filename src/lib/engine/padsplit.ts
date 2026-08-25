@@ -12,18 +12,45 @@ import { median, roundCents, sumCents, type Cents } from './money';
 export interface SummaryRow {
   propertyExternalId: string; // PSID
   earningsMonth: MonthKey;
+  /** When the money actually lands, which is the earnings month plus one. */
+  payoutMonth: MonthKey;
   grossCents: Cents;
-  feesCents: Cents;
+  /** Negative, as exported. Charged when a room is re-let. */
+  bookingFeesCents: Cents;
+  netOfBookingFeesCents: Cents;
+  /** Negative, as exported. 8% of collections net of booking fees. */
+  serviceFeesCents: Cents;
   hostEarningsCents: Cents;
+  /** Refunded booking fees and the like: income, not rent against a bill. */
+  adjustmentsCents: Cents;
+  /** Host earnings plus adjustments — the figure that hits the bank. */
+  totalPayoutCents: Cents;
+  /** The account it was paid into, as exported ("… ***7250"). */
+  payoutAccount: string | null;
+  address: string | null;
+}
+
+/** Booking fees plus service fees: everything PadSplit kept. Negative. */
+export function summaryFees(row: SummaryRow): Cents {
+  return row.bookingFeesCents + row.serviceFeesCents;
 }
 
 export type BilledKind = 'fee' | 'fine' | 'concession';
 
 export interface BilledLine {
+  /** Joins to a collection line, which is what makes ageing possible. */
+  billId: string;
   propertyExternalId: string | null;
   roomExternalId: string | null;
+  roomNumber: string | null;
+  memberId: string | null;
+  memberName: string | null;
+  /** The billed file has no month column; this is the month it was raised. */
   earningsMonth: MonthKey;
+  billedDate: IsoDate;
   billType: string;
+  /** membership_dues, promo_room_discount, overdue_balance, and so on. */
+  reason: string;
   kind: BilledKind;
   /** As exported: charges negative, concessions positive. */
   amountCents: Cents;
@@ -32,27 +59,26 @@ export interface BilledLine {
 export type CollectionCategory = 'collected' | 'adjustment';
 
 export interface CollectionLine {
+  /** Blank on an adjustment, which is not against any bill. */
+  billId: string | null;
   propertyExternalId: string | null;
   roomExternalId: string | null;
+  roomNumber: string | null;
+  memberId: string | null;
+  memberName: string | null;
   billType: string;
   category: CollectionCategory;
+  /** Gross collected on this line. */
   amountCents: Cents;
+  bookingFeeCents: Cents;
+  serviceFeeCents: Cents;
+  hostEarningsCents: Cents;
   /**
    * The column is labelled "Payout Month" but holds the EARNINGS month.
    * Blank on the in-flight month.
    */
   payoutMonthRaw: MonthKey | null;
   createdDate: IsoDate;
-}
-
-export interface EarningsTableRow {
-  propertyExternalId: string | null;
-  earningsMonth: MonthKey;
-  grossCents: Cents;
-  feesCents: Cents;
-  /** Authoritative over summary.csv, which understates credits. */
-  creditsCents: Cents;
-  payoutCents: Cents;
 }
 
 export const MEMBERSHIP_DUES = 'Membership Dues';
@@ -71,22 +97,30 @@ export function netBilled(lines: readonly BilledLine[]): Cents {
 }
 
 /**
- * Cash actually collected against an earnings month.
+ * Cash collected against what was billed, for an earnings month.
  *
- * Adjustments are included by default: they are corrections to collected cash,
- * not a separate bucket. UNVERIFIED against a fresh export — if the trailing
- * re-run (§6) misses, this flag is the first thing to try.
+ * Adjustments are NOT included, which an earlier version of this got wrong.
+ * Verified against a real export: excluding them makes all twenty
+ * property-months tie to summary.csv on gross collected AND on adjustments,
+ * and including them makes five of the twenty miss by exactly the adjustment.
+ *
+ * They are income — refunded booking fees and the like — but they are not
+ * money against a bill, so they belong in revenue and not in the denominator
+ * of a collection rate. `adjustments()` is the other half of this pair.
  */
-export function grossCollected(
-  lines: readonly CollectionLine[],
-  opts: { includeAdjustments?: boolean } = {},
-): Cents {
-  const includeAdjustments = opts.includeAdjustments ?? true;
-  return sumCents(
-    lines
-      .filter((l) => l.category === 'collected' || (includeAdjustments && l.category === 'adjustment'))
-      .map((l) => l.amountCents),
-  );
+export function grossCollected(lines: readonly CollectionLine[]): Cents {
+  return sumCents(lines.filter((l) => l.category === 'collected').map((l) => l.amountCents));
+}
+
+/**
+ * Miscellaneous income for the month: refunded booking fees and similar.
+ *
+ * These carry no room and no bill type, and PadSplit takes no service fee on
+ * them — they pass through at face value, which is why they sit outside host
+ * earnings and are added after it to reach the payout.
+ */
+export function adjustments(lines: readonly CollectionLine[]): Cents {
+  return sumCents(lines.filter((l) => l.category === 'adjustment').map((l) => l.amountCents));
 }
 
 export function delinquency(netBilledCents: Cents, grossCollectedCents: Cents): Cents {
@@ -136,7 +170,8 @@ export interface PropertyMonth {
   roomsOccupied: number;
   grossCents: Cents;
   feesCents: Cents;
-  creditsCents: Cents;
+  /** Refunded booking fees and the like. Income, but not rent against a bill. */
+  adjustmentsCents: Cents;
   hostEarningsCents: Cents;
   payoutCents: Cents;
   netBilledCents: Cents;
@@ -207,32 +242,69 @@ export function trueRoomRate(months: readonly PropertyMonth[]): Cents | null {
 }
 
 /**
- * Credits and payout come from earnings_table.csv, not summary.csv:
- * summary understates credits because unallocated adjustments carry a blank
- * Property ID.
+ * A month of the portfolio as PadSplit itself totals it.
+ *
+ * earnings_table.csv is not per property, which an earlier version of this
+ * assumed. It is one row per earnings month across every house, plus a
+ * year-to-date row, and it carries the in-flight flag explicitly rather than
+ * leaving it to be inferred from which month happens to be latest.
+ *
+ * Its value is as a check: the per-property rows should add up to it, and if
+ * they do not, the import is wrong before anything is posted.
  */
-export function creditsAndPayout(
-  earningsTable: readonly EarningsTableRow[],
-  propertyExternalId: string,
-  earningsMonth: MonthKey,
-): { creditsCents: Cents; payoutCents: Cents } | null {
-  const row = earningsTable.find(
-    (r) => r.propertyExternalId === propertyExternalId && r.earningsMonth === earningsMonth,
-  );
-  return row ? { creditsCents: row.creditsCents, payoutCents: row.payoutCents } : null;
+export interface PadSplitMonthTotal {
+  earningsMonth: MonthKey;
+  inFlight: boolean;
+  collectionsCents: Cents;
+  /** Booking fees plus service fees, as exported: negative. */
+  expensesCents: Cents;
+  adjustmentsCents: Cents;
+  payoutCents: Cents;
 }
 
-/** Adjustment lines with no Property ID — the reason summary.csv understates. */
-export function unallocatedCredits(earningsTable: readonly EarningsTableRow[]): Cents {
-  return sumCents(
-    earningsTable.filter((r) => r.propertyExternalId === null).map((r) => r.creditsCents),
-  );
+export interface MonthTie {
+  earningsMonth: MonthKey;
+  field: 'collections' | 'adjustments' | 'payout';
+  statedCents: Cents;
+  summedCents: Cents;
+  differenceCents: Cents;
+}
+
+/**
+ * The per-property rows against the total PadSplit states for that month.
+ *
+ * Verified to hold exactly on a real export — all three fields, all eight
+ * months — so a difference here is a parsing fault, not a rounding one.
+ */
+export function tieToMonthTotals(
+  totals: readonly PadSplitMonthTotal[],
+  perProperty: readonly { earningsMonth: MonthKey; grossCollectedCents: Cents; adjustmentsCents: Cents; payoutCents: Cents }[],
+): MonthTie[] {
+  const misses: MonthTie[] = [];
+
+  for (const total of totals) {
+    const rows = perProperty.filter((row) => row.earningsMonth === total.earningsMonth);
+    const checks: [MonthTie['field'], Cents, Cents][] = [
+      ['collections', total.collectionsCents, sumCents(rows.map((r) => r.grossCollectedCents))],
+      ['adjustments', total.adjustmentsCents, sumCents(rows.map((r) => r.adjustmentsCents))],
+      ['payout', total.payoutCents, sumCents(rows.map((r) => r.payoutCents))],
+    ];
+    for (const [field, stated, summed] of checks) {
+      // A cent of slack: the export carries four decimal places on fees and
+      // this side is whole cents.
+      if (Math.abs(stated - summed) > 1) {
+        misses.push({ earningsMonth: total.earningsMonth, field, statedCents: stated, summedCents: summed, differenceCents: summed - stated });
+      }
+    }
+  }
+
+  return misses;
 }
 
 export interface PadSplitPortfolioTotals {
   grossCents: Cents;
   feesCents: Cents;
-  creditsCents: Cents;
+  adjustmentsCents: Cents;
   payoutCents: Cents;
   collectionRate: number | null;
   monthsCovered: MonthKey[];
@@ -243,18 +315,15 @@ export interface PadSplitPortfolioTotals {
  * the in-flight month must already be dropped, which is why `months` is
  * explicit rather than inferred here.
  */
-export function portfolioTotals(
-  rows: readonly EarningsTableRow[],
-  propertyMonths: readonly PropertyMonth[],
-): PadSplitPortfolioTotals {
+export function portfolioTotals(propertyMonths: readonly PropertyMonth[]): PadSplitPortfolioTotals {
   const netBilledTotal = sumCents(propertyMonths.map((pm) => pm.netBilledCents));
   const collectedTotal = sumCents(propertyMonths.map((pm) => pm.grossCollectedCents));
   return {
-    grossCents: sumCents(rows.map((r) => r.grossCents)),
-    feesCents: sumCents(rows.map((r) => r.feesCents)),
-    creditsCents: sumCents(rows.map((r) => r.creditsCents)),
-    payoutCents: sumCents(rows.map((r) => r.payoutCents)),
+    grossCents: sumCents(propertyMonths.map((pm) => pm.grossCents)),
+    feesCents: sumCents(propertyMonths.map((pm) => pm.feesCents)),
+    adjustmentsCents: sumCents(propertyMonths.map((pm) => pm.adjustmentsCents)),
+    payoutCents: sumCents(propertyMonths.map((pm) => pm.payoutCents)),
     collectionRate: collectionRate(netBilledTotal, collectedTotal),
-    monthsCovered: [...new Set(rows.map((r) => r.earningsMonth))].sort(),
+    monthsCovered: [...new Set(propertyMonths.map((pm) => pm.earningsMonth))].sort(),
   };
 }

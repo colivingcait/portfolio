@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   collectionRate,
   comparableMonths,
-  creditsAndPayout,
   delinquency,
   earningsMonthOf,
   inFlightMonth,
@@ -11,7 +10,6 @@ import {
   occupancyRate,
   roomsOccupied,
   trueRoomRate,
-  unallocatedCredits,
   type BilledLine,
   type CollectionLine,
   type PropertyMonth,
@@ -20,11 +18,18 @@ import { cents } from '../money';
 
 function collected(over: Partial<CollectionLine> = {}): CollectionLine {
   return {
+    billId: 'b1',
     propertyExternalId: '8299',
     roomExternalId: 'room-1',
+    roomNumber: '1',
+    memberId: 'm1',
+    memberName: 'A Member',
     billType: 'Membership Dues',
     category: 'collected',
     amountCents: cents(700),
+    bookingFeeCents: 0,
+    serviceFeeCents: cents(-56),
+    hostEarningsCents: cents(644),
     payoutMonthRaw: '2026-06',
     createdDate: '2026-06-05',
     ...over,
@@ -33,10 +38,16 @@ function collected(over: Partial<CollectionLine> = {}): CollectionLine {
 
 function billed(over: Partial<BilledLine> = {}): BilledLine {
   return {
+    billId: 'b1',
     propertyExternalId: '8299',
     roomExternalId: 'room-1',
+    roomNumber: '1',
+    memberId: 'm1',
+    memberName: 'A Member',
     earningsMonth: '2026-06',
-    billType: 'Membership Dues',
+    billedDate: '2026-06-01',
+    billType: 'billed',
+    reason: 'membership_dues',
     kind: 'fee',
     amountCents: cents(-700), // charges are negative in the export
     ...over,
@@ -51,7 +62,7 @@ function propertyMonth(over: Partial<PropertyMonth> = {}): PropertyMonth {
     roomsOccupied: 8,
     grossCents: cents(6_000),
     feesCents: cents(900),
-    creditsCents: 0,
+    adjustmentsCents: 0,
     hostEarningsCents: cents(5_100),
     payoutCents: cents(5_100),
     netBilledCents: cents(6_000),
@@ -77,23 +88,7 @@ describe('rules that must not drift (§6)', () => {
     expect(inFlightMonth([])).toBeNull();
   });
 
-  it('takes credits and payout from earnings_table, not summary', () => {
-    const table = [
-      { propertyExternalId: '8299', earningsMonth: '2026-06', grossCents: cents(6_000), feesCents: cents(900), creditsCents: cents(120), payoutCents: cents(4_980) },
-    ];
-    expect(creditsAndPayout(table, '8299', '2026-06')).toEqual({
-      creditsCents: cents(120),
-      payoutCents: cents(4_980),
-    });
-  });
 
-  it('surfaces unallocated credits, which are why summary.csv understates', () => {
-    const table = [
-      { propertyExternalId: '8299', earningsMonth: '2026-06', grossCents: 0, feesCents: 0, creditsCents: cents(120), payoutCents: 0 },
-      { propertyExternalId: null, earningsMonth: '2026-06', grossCents: 0, feesCents: 0, creditsCents: cents(45), payoutCents: 0 },
-    ];
-    expect(unallocatedCredits(table)).toBe(cents(45));
-  });
 });
 
 describe('formulas (§6)', () => {

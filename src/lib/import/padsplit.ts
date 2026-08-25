@@ -24,24 +24,43 @@ import type {
   BilledLine,
   CollectionCategory,
   CollectionLine,
-  EarningsTableRow,
+  PadSplitMonthTotal,
   SummaryRow,
 } from '../engine/padsplit';
 
 export type PadSplitFileKind = 'summary' | 'billed' | 'collected' | 'earnings_table';
 
-const PROPERTY_ID = ['property id', 'propertyid', 'property', 'psid', 'property external id'];
-const ROOM_ID = ['room id', 'roomid', 'room', 'unit id', 'room external id'];
-const MONTH = ['earnings month', 'month', 'earning month', 'period'];
-const GROSS = ['gross', 'gross earnings', 'gross revenue', 'gross amount'];
-const FEES = ['fees', 'fee', 'padsplit fees', 'service fees', 'total fees'];
-const HOST_EARNINGS = ['host earnings', 'host earning', 'net earnings', 'host payout', 'earnings'];
-const CREDITS = ['credits', 'credit', 'adjustments', 'total credits'];
-const PAYOUT = ['payout', 'net payout', 'total payout', 'amount paid'];
-const BILL_TYPE = ['bill type', 'billtype', 'type', 'charge type', 'category'];
-const AMOUNT = ['amount', 'total', 'value'];
-const PAYOUT_MONTH = ['payout month', 'payoutmonth'];
-const CREATED = ['created', 'created date', 'created at', 'date created', 'date'];
+const PROPERTY_ID = ['property id', 'psid'];
+const ROOM_ID = ['room id'];
+const ROOM_NUMBER = ['room number'];
+const MEMBER_ID = ['member id'];
+const MEMBER_FIRST = ['member first name'];
+const MEMBER_LAST = ['member last name'];
+const EARNINGS_MONTH = ['earnings month'];
+const PAYOUT_MONTH = ['payout month'];
+const CREATED = ['created'];
+const BILL_ID = ['bill id'];
+const BILL_TYPE = ['bill type'];
+const GROSS_COLLECTED = ['gross collected'];
+const BOOKING_FEES = ['booking fees amount', 'booking fee amount'];
+const NET_OF_BOOKING = ['collections net of booking fees'];
+const SERVICE_FEES = ['service fees'];
+const HOST_EARNINGS = ['host earnings'];
+const ADJUSTMENTS = ['adjustments'];
+const TOTAL_PAYOUT = ['total payout'];
+const PAYOUT_ACCOUNT = ['payout account'];
+const ADDRESS = ['address', 'street 1'];
+const AMOUNT = ['amount'];
+const TRANSACTION_TYPE = ['transaction type'];
+const TRANSACTION_REASON = ['transaction reason'];
+const CATEGORY = ['category'];
+const ROW_TYPE = ['row_type', 'row type'];
+const MONTH = ['month'];
+const IN_FLIGHT = ['is_in_flight', 'is in flight'];
+const TOTAL_COLLECTIONS = ['total_collections', 'total collections'];
+const TOTAL_EXPENSES = ['total_expenses', 'total expenses'];
+const TOTAL_ADJUSTMENTS = ['total_adjustments', 'total adjustments'];
+const TOTAL_PAYOUT_COL = ['total_payout', 'total payout'];
 
 /** A header we matched, for the preview to show what it decided. */
 export interface ColumnReport {
@@ -57,7 +76,8 @@ export interface ParsedPadSplitFile {
   summary: SummaryRow[];
   billed: BilledLine[];
   collected: CollectionLine[];
-  earnings: EarningsTableRow[];
+  monthTotals: PadSplitMonthTotal[];
+  yearToDate: { year: number; collectionsCents: number; expensesCents: number; adjustmentsCents: number; payoutCents: number } | null;
   rowCount: number;
   /** Rows that could not be read, and why. */
   skipped: { line: number; reason: string; raw: string }[];
@@ -79,17 +99,18 @@ export class UnknownPadSplitFileError extends Error {
 /**
  * Which of the four files this is, from its headers alone.
  *
- * Order matters. earnings_table and summary both carry gross and fees, so the
- * columns unique to each are what separate them; collected and billed both
- * carry a bill type, and only collected has a created date.
+ * Each has something none of the others has: earnings_table is the only one
+ * with a row_type, collected the only one pairing a payout month with a bill
+ * id, summary the only per-property file with a total payout, and billed the
+ * only one with a transaction type.
  */
 export function detectFileKind(headers: string[]): PadSplitFileKind | null {
   const has = (candidates: string[]) => findColumn(headers, candidates) !== -1;
 
-  if (has(CREDITS) && has(PAYOUT)) return 'earnings_table';
-  if (has(PAYOUT_MONTH) || (has(CREATED) && has(BILL_TYPE))) return 'collected';
-  if (has(HOST_EARNINGS) && has(GROSS)) return 'summary';
-  if (has(BILL_TYPE) && has(AMOUNT)) return 'billed';
+  if (has(ROW_TYPE) && has(TOTAL_COLLECTIONS)) return 'earnings_table';
+  if (has(TRANSACTION_TYPE) && has(AMOUNT)) return 'billed';
+  if (has(PAYOUT_MONTH) && has(BILL_ID)) return 'collected';
+  if (has(EARNINGS_MONTH) && has(TOTAL_PAYOUT)) return 'summary';
   return null;
 }
 
@@ -118,23 +139,19 @@ export function parseMonth(raw: string): MonthKey | null {
 }
 
 /**
- * How a billed line is classified.
+ * The export states both of these outright, so neither is inferred.
  *
- * A concession is money given back and arrives positive; a fine is a penalty;
- * everything else is a fee. Classified from the bill type text because the
- * export has no column for it.
+ * An earlier version read them out of the bill-type wording, which was a
+ * guess made before anyone had seen a real file. Transaction Type carries
+ * fee/concession/fine, and Category carries collected/adjustment.
  */
-export function billedKindOf(billType: string, amountCents: number): BilledKind {
-  const text = billType.toLowerCase();
-  if (/concession|discount|waiver|waive|credit/.test(text)) return 'concession';
-  if (/fine|penalt|violation|late fee/.test(text)) return 'fine';
-  return amountCents > 0 ? 'concession' : 'fee';
+export function billedKindOf(transactionType: string): BilledKind {
+  const value = transactionType.trim().toLowerCase();
+  return value === 'concession' || value === 'fine' ? value : 'fee';
 }
 
-/** Collected cash versus a correction to it. */
-export function collectionCategoryOf(billType: string, rawCategory: string): CollectionCategory {
-  const text = `${rawCategory} ${billType}`.toLowerCase();
-  return /adjust|refund|reversal|correction|chargeback/.test(text) ? 'adjustment' : 'collected';
+export function collectionCategoryOf(category: string): CollectionCategory {
+  return category.trim().toLowerCase() === 'adjustment' ? 'adjustment' : 'collected';
 }
 
 function blankToNull(value: string | undefined): string | null {
@@ -157,20 +174,39 @@ export function parsePadSplitFile(text: string): ParsedPadSplitFile {
   const rows = parseCsv(text);
   if (rows.length === 0) throw new UnknownPadSplitFileError([]);
 
+  // Headers in the collected export carry leading and trailing spaces.
   const headers = rows[0].map((header) => header.trim());
   const kind = detectFileKind(headers);
   if (!kind) throw new UnknownPadSplitFileError(headers);
 
   const FIELDS: Record<PadSplitFileKind, Record<string, string[]>> = {
-    summary: { propertyExternalId: PROPERTY_ID, earningsMonth: MONTH, gross: GROSS, fees: FEES, hostEarnings: HOST_EARNINGS },
-    earnings_table: { propertyExternalId: PROPERTY_ID, earningsMonth: MONTH, gross: GROSS, fees: FEES, credits: CREDITS, payout: PAYOUT },
-    billed: { propertyExternalId: PROPERTY_ID, roomExternalId: ROOM_ID, earningsMonth: MONTH, billType: BILL_TYPE, amount: AMOUNT },
-    collected: { propertyExternalId: PROPERTY_ID, roomExternalId: ROOM_ID, billType: BILL_TYPE, amount: AMOUNT, payoutMonth: PAYOUT_MONTH, created: CREATED, category: ['category', 'status', 'kind'] },
+    summary: {
+      earningsMonth: EARNINGS_MONTH, payoutMonth: PAYOUT_MONTH, propertyExternalId: PROPERTY_ID,
+      address: ADDRESS, gross: GROSS_COLLECTED, bookingFees: BOOKING_FEES, netOfBooking: NET_OF_BOOKING,
+      serviceFees: SERVICE_FEES, hostEarnings: HOST_EARNINGS, adjustments: ADJUSTMENTS,
+      totalPayout: TOTAL_PAYOUT, payoutAccount: PAYOUT_ACCOUNT,
+    },
+    billed: {
+      billId: BILL_ID, created: CREATED, propertyExternalId: PROPERTY_ID, roomExternalId: ROOM_ID,
+      roomNumber: ROOM_NUMBER, memberId: MEMBER_ID, memberFirst: MEMBER_FIRST, memberLast: MEMBER_LAST,
+      amount: AMOUNT, transactionType: TRANSACTION_TYPE, reason: TRANSACTION_REASON, category: CATEGORY,
+    },
+    collected: {
+      created: CREATED, payoutMonth: PAYOUT_MONTH, propertyExternalId: PROPERTY_ID, roomExternalId: ROOM_ID,
+      roomNumber: ROOM_NUMBER, memberId: MEMBER_ID, memberFirst: MEMBER_FIRST, memberLast: MEMBER_LAST,
+      billId: BILL_ID, billType: BILL_TYPE, gross: GROSS_COLLECTED, bookingFee: BOOKING_FEES,
+      serviceFees: SERVICE_FEES, hostEarnings: HOST_EARNINGS, category: CATEGORY,
+    },
+    earnings_table: {
+      rowType: ROW_TYPE, month: MONTH, inFlight: IN_FLIGHT, collections: TOTAL_COLLECTIONS,
+      expenses: TOTAL_EXPENSES, adjustments: TOTAL_ADJUSTMENTS, payout: TOTAL_PAYOUT_COL,
+    },
   };
 
   const { columns, used } = report(headers, FIELDS[kind]);
   const at = (field: string) => columns.find((column) => column.field === field)?.index ?? -1;
-  const cell = (row: string[], field: string) => (at(field) === -1 ? '' : (row[at(field)] ?? ''));
+  const cell = (row: string[], field: string) => (at(field) === -1 ? '' : (row[at(field)] ?? '').trim());
+  const money = (row: string[], field: string) => parseAmount(cell(row, field)) ?? 0;
 
   const result: ParsedPadSplitFile = {
     kind,
@@ -178,7 +214,8 @@ export function parsePadSplitFile(text: string): ParsedPadSplitFile {
     summary: [],
     billed: [],
     collected: [],
-    earnings: [],
+    monthTotals: [],
+    yearToDate: null,
     rowCount: 0,
     skipped: [],
     columns,
@@ -186,71 +223,87 @@ export function parsePadSplitFile(text: string): ParsedPadSplitFile {
   };
 
   const months = new Set<MonthKey>();
+  const name = (row: string[]) => {
+    const full = `${cell(row, 'memberFirst')} ${cell(row, 'memberLast')}`.trim();
+    return full === '' ? null : full;
+  };
 
   for (let i = 1; i < rows.length; i += 1) {
     const row = rows[i];
     const raw = row.join(',');
     const skip = (reason: string) => result.skipped.push({ line: i + 1, reason, raw });
 
-    if (kind === 'summary' || kind === 'earnings_table') {
-      const month = parseMonth(cell(row, 'earningsMonth'));
-      if (!month) {
-        skip('no earnings month');
-        continue;
-      }
-      const gross = parseAmount(cell(row, 'gross')) ?? 0;
-      const fees = parseAmount(cell(row, 'fees')) ?? 0;
-      months.add(month);
-
-      if (kind === 'summary') {
-        const propertyExternalId = blankToNull(cell(row, 'propertyExternalId'));
-        if (!propertyExternalId) {
-          skip('no property id');
-          continue;
-        }
-        result.summary.push({
-          propertyExternalId,
-          earningsMonth: month,
-          grossCents: gross,
-          feesCents: fees,
-          hostEarningsCents: parseAmount(cell(row, 'hostEarnings')) ?? gross - Math.abs(fees),
-        });
-      } else {
-        // A blank property id is expected here and must be kept: an
-        // unallocated adjustment is exactly what summary.csv loses.
-        result.earnings.push({
-          propertyExternalId: blankToNull(cell(row, 'propertyExternalId')),
-          earningsMonth: month,
-          grossCents: gross,
-          feesCents: fees,
-          creditsCents: parseAmount(cell(row, 'credits')) ?? 0,
-          payoutCents: parseAmount(cell(row, 'payout')) ?? 0,
-        });
-      }
+    if (kind === 'summary') {
+      const earningsMonth = parseMonth(cell(row, 'earningsMonth'));
+      const propertyExternalId = blankToNull(cell(row, 'propertyExternalId'));
+      if (!earningsMonth) { skip('no earnings month'); continue; }
+      if (!propertyExternalId) { skip('no property id'); continue; }
+      months.add(earningsMonth);
+      result.summary.push({
+        propertyExternalId,
+        earningsMonth,
+        // Stated in the file rather than assumed to be the next month.
+        payoutMonth: parseMonth(cell(row, 'payoutMonth')) ?? addMonth(earningsMonth),
+        grossCents: money(row, 'gross'),
+        bookingFeesCents: money(row, 'bookingFees'),
+        netOfBookingFeesCents: money(row, 'netOfBooking'),
+        serviceFeesCents: money(row, 'serviceFees'),
+        hostEarningsCents: money(row, 'hostEarnings'),
+        adjustmentsCents: money(row, 'adjustments'),
+        totalPayoutCents: money(row, 'totalPayout'),
+        payoutAccount: blankToNull(cell(row, 'payoutAccount')),
+        address: blankToNull(cell(row, 'address')),
+      });
       result.rowCount += 1;
       continue;
     }
 
-    const amount = parseAmount(cell(row, 'amount'));
-    if (amount === null) {
-      skip('no amount');
-      continue;
-    }
-    const billType = cell(row, 'billType').trim();
-
-    if (kind === 'billed') {
-      const month = parseMonth(cell(row, 'earningsMonth'));
-      if (!month) {
-        skip('no earnings month');
+    if (kind === 'earnings_table') {
+      const rowType = cell(row, 'rowType').toLowerCase();
+      const total = {
+        collectionsCents: money(row, 'collections'),
+        expensesCents: money(row, 'expenses'),
+        adjustmentsCents: money(row, 'adjustments'),
+        payoutCents: money(row, 'payout'),
+      };
+      if (rowType === 'year_to_date') {
+        result.yearToDate = { year: Number(cell(row, 'month')) || 0, ...total };
+        result.rowCount += 1;
         continue;
       }
+      const month = parseMonth(cell(row, 'month'));
+      if (!month) { skip('no month'); continue; }
       months.add(month);
+      result.monthTotals.push({
+        earningsMonth: month,
+        // Stated outright, so which month is still collecting never has to be
+        // guessed from whichever happens to be latest in the file.
+        inFlight: /^(true|yes|1)$/i.test(cell(row, 'inFlight')),
+        ...total,
+      });
+      result.rowCount += 1;
+      continue;
+    }
+
+    if (kind === 'billed') {
+      const billedDate = parseDate(cell(row, 'created'));
+      if (!billedDate) { skip('no created date'); continue; }
+      const amount = parseAmount(cell(row, 'amount'));
+      if (amount === null) { skip('no amount'); continue; }
+      const earningsMonth = billedDate.slice(0, 7);
+      months.add(earningsMonth);
       result.billed.push({
+        billId: cell(row, 'billId'),
         propertyExternalId: blankToNull(cell(row, 'propertyExternalId')),
         roomExternalId: blankToNull(cell(row, 'roomExternalId')),
-        earningsMonth: month,
-        billType,
-        kind: billedKindOf(billType, amount),
+        roomNumber: blankToNull(cell(row, 'roomNumber')),
+        memberId: blankToNull(cell(row, 'memberId')),
+        memberName: name(row),
+        earningsMonth,
+        billedDate,
+        billType: cell(row, 'category'),
+        reason: cell(row, 'reason'),
+        kind: billedKindOf(cell(row, 'transactionType')),
         amountCents: amount,
       });
       result.rowCount += 1;
@@ -258,27 +311,41 @@ export function parsePadSplitFile(text: string): ParsedPadSplitFile {
     }
 
     // collected
-    const created = parseDate(cell(row, 'created'));
-    if (!created) {
-      skip('no created date');
-      continue;
-    }
+    const createdDate = parseDate(cell(row, 'created'));
+    if (!createdDate) { skip('no created date'); continue; }
+    const amount = parseAmount(cell(row, 'gross'));
+    if (amount === null) { skip('no gross collected'); continue; }
     // Mislabelled on purpose: this column holds the EARNINGS month, and is
-    // blank while that month is still collecting.
+    // blank while that month is still collecting. Verified on a real export,
+    // including one June collection booked back to May — so the column wins
+    // over the created date wherever it has a value.
     const payoutMonthRaw = parseMonth(cell(row, 'payoutMonth'));
-    months.add(payoutMonthRaw ?? created.slice(0, 7));
+    months.add(payoutMonthRaw ?? createdDate.slice(0, 7));
     result.collected.push({
+      billId: blankToNull(cell(row, 'billId')),
       propertyExternalId: blankToNull(cell(row, 'propertyExternalId')),
       roomExternalId: blankToNull(cell(row, 'roomExternalId')),
-      billType,
-      category: collectionCategoryOf(billType, cell(row, 'category')),
+      roomNumber: blankToNull(cell(row, 'roomNumber')),
+      memberId: blankToNull(cell(row, 'memberId')),
+      memberName: name(row),
+      billType: cell(row, 'billType'),
+      category: collectionCategoryOf(cell(row, 'category')),
       amountCents: amount,
+      bookingFeeCents: money(row, 'bookingFee'),
+      serviceFeeCents: money(row, 'serviceFees'),
+      hostEarningsCents: money(row, 'hostEarnings'),
       payoutMonthRaw,
-      createdDate: created,
+      createdDate,
     });
     result.rowCount += 1;
   }
 
   result.months = [...months].sort();
   return result;
+}
+
+/** The month after this one, for the rare summary row with no payout month. */
+function addMonth(month: MonthKey): MonthKey {
+  const [year, index] = month.split('-').map(Number);
+  return index === 12 ? `${year + 1}-01` : `${year}-${String(index + 1).padStart(2, '0')}`;
 }
