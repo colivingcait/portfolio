@@ -120,6 +120,10 @@ describe('assembling a PM-managed PadSplit month', () => {
     debtBalanceCents: cents(250_000),
     roomsTotal: 8,
     padsplit: {
+      // The platform collected 9,500 of rent and kept 800 of it.
+      grossCollectedCents: cents(9_500),
+      platformFeesCents: cents(800),
+      adjustmentsCents: cents(0),
       hostEarningsCents: cents(8_700),
       pmFeeCents: cents(1_050),
       pmPaidOpexCents: cents(750),
@@ -131,15 +135,24 @@ describe('assembling a PM-managed PadSplit month', () => {
     },
   });
 
-  it('earns host earnings, not the deposit that landed', () => {
-    expect(rollup.revenueCents).toBe(cents(8_700));
+  it('earns the rent collected on its behalf, gross, not the deposit that landed', () => {
+    // The platform collecting rent and remitting the balance does not reduce
+    // what was earned: 9,500 of rent is income and the 800 it kept is a cost.
+    // Reporting 8,700 instead would forfeit the deduction on the 800.
+    expect(rollup.revenueCents).toBe(cents(9_500));
     expect(rollup.depositReceivedCents).toBe(cents(6_900));
   });
 
-  it('counts the PM fee and the costs the PM fronted as operating expenses', () => {
-    // 420 owner-paid + 750 PM-paid + 1,050 fee
-    expect(rollup.operatingExpenseCents).toBe(cents(2_220));
+  it('counts the platform fee alongside the PM fee and the costs the PM fronted', () => {
+    // 420 owner-paid + 750 PM-paid + 1,050 PM fee + 800 platform fee
+    expect(rollup.operatingExpenseCents).toBe(cents(3_020));
     expect(rollup.noiCents).toBe(cents(6_480));
+  });
+
+  it('leaves NOI where it was: the fee moved sides, it did not appear', () => {
+    // Gross revenue less the fee is the same figure as net revenue was, which
+    // is the point — the change is where it is reported, not what was earned.
+    expect(rollup.revenueCents - rollup.platformFeesCents).toBe(cents(8_700));
   });
 
   it('nets cash from the deposit that actually landed, not from host earnings', () => {

@@ -690,6 +690,9 @@ model MonthlyPropertyRollup {
 
   revenueCents          Int @default(0)
   hostEarningsCents     Int @default(0)
+  /// What the platform kept out of the rent it collected. An expense, not a
+  /// reduction in revenue — that is where the deduction lives.
+  platformFeesCents     Int @default(0)
   pmFeeCents            Int @default(0)
   ownerPaidOpexCents    Int @default(0)
   pmPaidOpexCents       Int @default(0)

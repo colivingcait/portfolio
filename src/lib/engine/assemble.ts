@@ -87,6 +87,19 @@ export interface AssembleInput {
   roomsTotal: number;
   /** From the PadSplit import, once it exists. */
   padsplit?: {
+    /**
+     * Rent the platform collected on your behalf, before it took its cut.
+     *
+     * This is the revenue figure, not host earnings. An agent collecting rent
+     * and remitting the balance does not reduce what you earned — the rent is
+     * income and the agent's fee is a deductible expense, and reporting the
+     * net instead silently forfeits the deduction.
+     */
+    grossCollectedCents: Cents;
+    /** Booking plus service fees. Positive here: it is a cost. */
+    platformFeesCents: Cents;
+    /** Refunded booking fees and the like. Income, but not rent. */
+    adjustmentsCents: Cents;
     hostEarningsCents: Cents;
     pmFeeCents: Cents;
     pmPaidOpexCents: Cents;
@@ -105,13 +118,20 @@ export interface AssembleInput {
 export function assemblePropertyRollup(input: AssembleInput): PropertyRollup {
   const padsplit = input.padsplit ?? null;
 
-  // A PadSplit house earns what the platform says it earned; a direct property
-  // earns what was categorized as income on its own statement.
-  const revenueCents = padsplit ? padsplit.hostEarningsCents : input.bank.revenueCents;
+  // A PadSplit house earns the rent the platform collected, gross, plus any
+  // misc income; a direct property earns what was categorized as income on its
+  // own statement. The platform's cut is a cost rather than a reduction in
+  // revenue — the same treatment any letting agent gets, and the only one that
+  // puts the fee where a tax return can deduct it.
+  const revenueCents = padsplit
+    ? padsplit.grossCollectedCents + padsplit.adjustmentsCents
+    : input.bank.revenueCents;
+  const platformFeesCents = padsplit ? padsplit.platformFeesCents : 0;
   const pmFeeCents = padsplit ? padsplit.pmFeeCents : 0;
   const pmPaidOpexCents = padsplit ? padsplit.pmPaidOpexCents : 0;
 
-  const operatingExpenseCents = input.bank.ownerPaidOpexCents + pmPaidOpexCents + pmFeeCents;
+  const operatingExpenseCents =
+    input.bank.ownerPaidOpexCents + pmPaidOpexCents + pmFeeCents + platformFeesCents;
   const noiCents = revenueCents - operatingExpenseCents;
 
   // Net cash is what left the property's own account: money the PM never
@@ -128,6 +148,7 @@ export function assemblePropertyRollup(input: AssembleInput): PropertyRollup {
 
     revenueCents,
     hostEarningsCents: padsplit ? padsplit.hostEarningsCents : 0,
+    platformFeesCents,
     pmFeeCents,
     ownerPaidOpexCents: input.bank.ownerPaidOpexCents,
     pmPaidOpexCents,

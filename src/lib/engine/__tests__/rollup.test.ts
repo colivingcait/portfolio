@@ -15,6 +15,7 @@ function rollup(over: Partial<PropertyRollup> = {}): PropertyRollup {
     month: '2026-08',
     entityId: 'entity:lustra',
     revenueCents: cents(8_000),
+    platformFeesCents: 0,
     hostEarningsCents: cents(8_000),
     pmFeeCents: cents(1_050),
     ownerPaidOpexCents: cents(1_200),

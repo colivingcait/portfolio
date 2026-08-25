@@ -147,37 +147,97 @@ export async function getOperations(monthParam?: string): Promise<OperationsData
     };
   });
 
-  // What is still owed, aged by how old the charge is. Concessions are money
-  // given back, never owed, so they are not in here.
-  const order = [...months].reverse();
-  const bucketOf = (m: string) => {
-    const index = order.indexOf(m);
-    return index === 0 ? '0–30 days' : index === 1 ? '31–60 days' : index === 2 ? '61–90 days' : 'Over 90 days';
+  // What is still owed.
+  //
+  // Concessions are netted in, which an earlier version of this did not do:
+  // it summed the charges and ignored the credits, so a member whose dues had
+  // been waived still showed the full amount owing. A waiver, a discount and a
+  // reversed penalty all reduce what is owed and all arrive as concession
+  // lines, so the balance is the NET of everything billed less what was
+  // collected against it.
+  //
+  // Adjustment collections are not payments — they carry no bill id and are
+  // misc income to the host — so they never settle anything here.
+  interface Ledger {
+    netBilledCents: number;
+    collectedCents: number;
+  }
+  const ledger = new Map<string, Map<string, Ledger>>(); // member -> month -> ledger
+  const memberMeta = new Map<string, { name: string; propertyName: string; roomNumber: string | null }>();
+  const reasonNet = new Map<string, number>();
+
+  const entry = (memberId: string, month: string): Ledger => {
+    const months = ledger.get(memberId) ?? new Map<string, Ledger>();
+    const found = months.get(month) ?? { netBilledCents: 0, collectedCents: 0 };
+    months.set(month, found);
+    ledger.set(memberId, months);
+    return found;
   };
-  const ageing = new Map<string, number>();
-  const byReason = new Map<string, number>();
-  const byMember = new Map<string, MemberBalance>();
 
   for (const bill of billed) {
-    if (bill.kind === 'concession') continue;
-    const outstanding = -bill.amountCents - (paidByBill.get(bill.billId) ?? 0);
-    if (outstanding <= 0) continue;
+    const memberId = bill.memberId ?? `unassigned:${bill.propertyExternalId ?? '?'}`;
+    const row = entry(memberId, bill.earningsMonth);
+    row.netBilledCents += -bill.amountCents; // charges negative, so owed is positive
+    row.collectedCents += paidByBill.get(bill.billId) ?? 0;
 
-    const bucket = bucketOf(bill.earningsMonth);
-    ageing.set(bucket, (ageing.get(bucket) ?? 0) + outstanding);
-    byReason.set(bill.reason, (byReason.get(bill.reason) ?? 0) + outstanding);
-
-    if (bill.memberId) {
-      const existing = byMember.get(bill.memberId);
-      byMember.set(bill.memberId, {
-        memberId: bill.memberId,
-        memberName: bill.memberName ?? 'Unknown',
+    if (!memberMeta.has(memberId)) {
+      memberMeta.set(memberId, {
+        name: bill.memberName ?? 'Unassigned',
         propertyName: byPsid.get(bill.propertyExternalId ?? '')?.name ?? '—',
         roomNumber: bill.roomNumber,
-        outstandingCents: (existing?.outstandingCents ?? 0) + outstanding,
+      });
+    }
+    reasonNet.set(bill.reason, (reasonNet.get(bill.reason) ?? 0) + -bill.amountCents);
+  }
+
+  // Ageing is oldest-first: money paid settles the oldest debt before the
+  // newest, which is what makes "over 90 days" mean anything. Netting per
+  // member and then bucketing would put a member who is paying steadily but
+  // behind into the wrong bucket entirely.
+  const order = [...months];
+  const bucketFor = (m: string) => {
+    const index = order.length - 1 - order.indexOf(m);
+    return index <= 0 ? '0–30 days' : index === 1 ? '31–60 days' : index === 2 ? '61–90 days' : 'Over 90 days';
+  };
+  const ageing = new Map<string, number>();
+  const byMember = new Map<string, MemberBalance>();
+
+  for (const [memberId, byMonth] of ledger) {
+    const owed = [...byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    let credit = owed.reduce((sum, [, row]) => sum + row.collectedCents, 0);
+    let balance = 0;
+
+    for (const [month, row] of owed) {
+      let unpaid = row.netBilledCents;
+      // A month that was net credited passes its credit forward.
+      if (unpaid < 0) {
+        credit += -unpaid;
+        unpaid = 0;
+      }
+      const applied = Math.min(credit, unpaid);
+      credit -= applied;
+      unpaid -= applied;
+      if (unpaid > 0) {
+        ageing.set(bucketFor(month), (ageing.get(bucketFor(month)) ?? 0) + unpaid);
+        balance += unpaid;
+      }
+    }
+
+    const meta = memberMeta.get(memberId);
+    if (balance > 0 && meta) {
+      byMember.set(memberId, {
+        memberId,
+        memberName: meta.name,
+        propertyName: meta.propertyName,
+        roomNumber: meta.roomNumber,
+        outstandingCents: balance,
       });
     }
   }
+
+  const byReason = new Map(
+    [...reasonNet.entries()].filter(([, amount]) => amount > 0),
+  );
 
   // How long cash actually takes to arrive after a charge is raised.
   const billDate = new Map(billed.map((b) => [b.billId, requireIsoDate(b.billedDate)]));

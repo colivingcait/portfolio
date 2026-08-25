@@ -29,6 +29,7 @@ export interface ViewSpec {
 export const PRORATABLE_METRICS = [
   'revenueCents',
   'hostEarningsCents',
+  'platformFeesCents',
   'pmFeeCents',
   'operatingExpenseCents',
   'ownerPaidOpexCents',
@@ -82,6 +83,8 @@ export interface PropertyRollup {
   // Proratable — money
   revenueCents: Cents;
   hostEarningsCents: Cents;
+  /** What the platform kept out of the rent it collected. A cost. */
+  platformFeesCents: Cents;
   pmFeeCents: Cents;
   ownerPaidOpexCents: Cents;
   pmPaidOpexCents: Cents;
