@@ -44,13 +44,13 @@ export const METRICS: MetricSpec[] = [
     key: 'occupancy',
     label: 'Occupancy',
     unit: 'percent',
-    note: 'Rooms whose dues stuck, against the rooms the house has. The portfolio line is rooms over rooms, not an average of the houses.',
+    note: 'Room-days let against room-days the houses had to sell. Each weekly charge is spread across the seven days it pays for, so a room let for nine days of a month counts as nine days — and a week raised on 30 July is credited to August, where it belongs.',
   },
   {
     key: 'turnovers',
     label: 'Turnovers',
     unit: 'count',
-    note: 'Rooms that changed hands. Every one costs a booking fee, so this line usually explains the fee line.',
+    note: 'Tenancies that ended — a room emptying, whether or not anyone replaced them. Every one eventually costs a booking fee, so this line usually explains the fee line. The most recent month is a floor: a move-out in the export’s last week is not visible yet.',
   },
   {
     key: 'collectionRate',

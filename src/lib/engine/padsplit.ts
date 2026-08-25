@@ -6,7 +6,7 @@
  * somewhere else.
  */
 
-import { monthOf, type IsoDate, type MonthKey } from './dates';
+import { addDays, daysBetween, monthEnd, monthOf, monthStart, type IsoDate, type MonthKey } from './dates';
 import { median, roundCents, sumCents, type Cents } from './money';
 
 export interface SummaryRow {
@@ -133,79 +133,246 @@ export function collectionRate(netBilledCents: Cents, grossCollectedCents: Cents
   return (grossCollectedCents / netBilledCents) * 100;
 }
 
+
 /**
- * Dues that survived, netted per room and per member.
+ * Occupancy and turnover are read off the BILLED file, never the collected one.
  *
- * A dues charge that is later undone is not absent from the export — it is
- * charged and then reversed, same bill, usually the same day, and both halves
- * are Membership Dues marked collected. Two different things produce that
- * shape and the data cannot tell them apart:
+ * They used to be read off collections, and both were wrong in ways that hid
+ * each other. A room counted as occupied if any cash landed on it, so a room
+ * that collected $178 of $880 billed scored the same as a room that paid in
+ * full — while a room let to someone delinquent scored as empty. And a person
+ * counted as a resident if they paid in the month, so a member who had already
+ * moved out and was settling an old balance — seventeen cents, in one real
+ * case — appeared as a second occupant and invented a turnover.
  *
- *   - a booking request that never became a move-in;
- *   - a resident moved between rooms, where the old room is reversed and the
- *     new one charged.
- *
- * Netting handles both without needing to know which. The reversed side sums
- * to zero and drops out; the side where the money stuck counts. A transferred
- * resident is counted once, in the room that kept the money, rather than twice
- * or in the room they left.
- *
- * Counting distinct rooms with any dues line instead put people in rooms they
- * never occupied: Glen Mora read 7 of 8 rooms in a month it had 5. Sixteen
- * member-months in one real export net to exactly zero this way.
- *
- * A member who paid something PadSplit then kept entirely as a booking fee did
- * move in and is counted — the host earned nothing that month, which is a fact
- * about the money and not about whether the room was occupied.
+ * Who was billed for a room is who lived in it. What they were billed, net of
+ * every waiver and proration, is how much of the month they had it for.
+ * Whether they then paid is the collection rate's business, and is deliberately
+ * a separate number.
  */
-function netDuesBy(
-  lines: readonly CollectionLine[],
-  key: (line: CollectionLine) => string | null,
+
+/**
+ * Billed lines that are rent, or adjust rent.
+ *
+ * Fines go by kind. These two are `fee` lines that are nonetheless not rent —
+ * an administrative charge and the flexible-stay premium — and neither says
+ * anything about whether a room was let.
+ */
+const NON_DUES_REASONS = new Set(['administrative', 'flexible_stay_fee_host']);
+
+export function isDuesLine(line: BilledLine): boolean {
+  return line.kind !== 'fine' && !NON_DUES_REASONS.has(line.reason);
+}
+
+/**
+ * Dues billed, net of everything credited back against them.
+ *
+ * Positive means charged. A booking that fell through nets to zero, because
+ * the export raises the dues and then waives the same amount; so does a member
+ * whose transfer was cancelled. Someone who moved out mid-week nets to a part
+ * of the week, which is exactly the resolution wanted.
+ */
+export function netDuesBilled(lines: readonly BilledLine[]): Cents {
+  const total = sumCents(lines.filter(isDuesLine).map((l) => l.amountCents));
+  // Negating a zero sum yields -0, which is not Object.is-equal to 0 and would
+  // surface as "-$0.00" the moment one reached a formatter.
+  return total === 0 ? 0 : -total;
+}
+
+function netDuesBilledBy(
+  lines: readonly BilledLine[],
+  key: (line: BilledLine) => string | null,
 ): Map<string, Cents> {
   const totals = new Map<string, Cents>();
   for (const line of lines) {
-    if (line.billType !== MEMBERSHIP_DUES || line.category !== 'collected') continue;
+    if (!isDuesLine(line)) continue;
     const id = key(line);
     if (!id) continue;
-    totals.set(id, (totals.get(id) ?? 0) + line.amountCents);
+    totals.set(id, (totals.get(id) ?? 0) - line.amountCents);
   }
   return totals;
 }
 
-export function roomsOccupied(lines: readonly CollectionLine[]): number {
-  return [...netDuesBy(lines, (l) => l.roomExternalId).values()].filter((cents) => cents > 0).length;
+/** Rooms someone was billed rent for: rooms that were let, at all, that month. */
+export function roomsLet(lines: readonly BilledLine[]): number {
+  return [...netDuesBilledBy(lines, (l) => l.roomNumber).values()].filter((cents) => cents > 0).length;
 }
 
-/** People who actually took a room, reversed bookings excluded. */
-export function residents(lines: readonly CollectionLine[]): number {
-  return [...netDuesBy(lines, (l) => l.memberId).values()].filter((cents) => cents > 0).length;
+/** People who actually took a room. Fallen-through bookings net to nothing. */
+export function residentsBilled(lines: readonly BilledLine[]): number {
+  return [...netDuesBilledBy(lines, (l) => l.memberId).values()].filter((cents) => cents > 0).length;
+}
+
+/** PadSplit bills dues weekly, in advance, on each member's own anniversary day. */
+export const DUES_PERIOD_DAYS = 7;
+
+export interface TenancyEnd {
+  roomNumber: string;
+  memberId: string;
+  memberName: string | null;
+  /** The last week they were billed for. */
+  lastDuesDate: IsoDate;
+  /** The month the turnover is attributed to. */
+  earningsMonth: MonthKey;
 }
 
 /**
- * Rooms that changed hands: people beyond one per occupied room.
+ * Tenancies that ended, read off the billing cadence.
  *
- * Two payers in one room over a month is one turnover. Reversed bookings are
- * excluded on both sides, or a room that was merely enquired about would look
- * like a room that emptied and refilled.
+ * A turnover is a room emptying, and the earlier rule — people beyond one per
+ * room — could only see a handover that completed inside one calendar month.
+ * A resident who left with nobody lined up registered in no month at all: five
+ * people left one house in a single week and it reported zero.
+ *
+ * Dues are billed weekly in advance, so a tenancy shows its own end by
+ * stopping. If the next week's charge was due before the export was taken and
+ * never came, they had gone by then.
+ *
+ * `horizon` is the last date the export can speak to — the latest billed date
+ * in the file. Someone whose next charge falls after it is not judged, which
+ * is why a move-out in the final week of an export is invisible until the next
+ * one arrives: the count for the most recent month is a floor, not a total.
+ *
+ * A move between rooms in the same house ends a tenancy here, and should: the
+ * room they left emptied and had to be re-let.
  */
-export function turnovers(lines: readonly CollectionLine[]): number {
-  const byRoom = new Map<string, Set<string>>();
-  const netByRoomMember = netDuesBy(lines, (l) => (l.roomExternalId && l.memberId ? `${l.roomExternalId}|${l.memberId}` : null));
+export function tenancyEnds(lines: readonly BilledLine[], horizon: IsoDate): TenancyEnd[] {
+  interface Last {
+    date: IsoDate;
+    month: MonthKey;
+    name: string | null;
+  }
+  const last = new Map<string, Last>();
 
-  for (const [key, cents] of netByRoomMember) {
-    if (cents <= 0) continue;
-    const [room, member] = key.split('|');
-    const people = byRoom.get(room) ?? new Set<string>();
-    people.add(member);
-    byRoom.set(room, people);
+  for (const line of lines) {
+    if (line.reason !== 'membership_dues' || line.amountCents >= 0) continue;
+    if (!line.roomNumber || !line.memberId) continue;
+    const key = `${line.roomNumber}|${line.memberId}`;
+    const found = last.get(key);
+    if (!found || line.billedDate > found.date) {
+      last.set(key, { date: line.billedDate, month: line.earningsMonth, name: line.memberName });
+    }
   }
 
-  return [...byRoom.values()].reduce((total, people) => total + Math.max(0, people.size - 1), 0);
+  // A booking that fell through is charged and waived to nothing. It never was
+  // a tenancy, so it cannot have ended.
+  const net = netDuesBilledBy(lines, (l) => (l.roomNumber && l.memberId ? `${l.roomNumber}|${l.memberId}` : null));
+
+  const ends: TenancyEnd[] = [];
+  for (const [key, found] of last) {
+    if ((net.get(key) ?? 0) <= 0) continue;
+    if (daysBetween(found.date, horizon) < DUES_PERIOD_DAYS) continue;
+    const [roomNumber, memberId] = key.split('|');
+    ends.push({ roomNumber, memberId, memberName: found.name, lastDuesDate: found.date, earningsMonth: found.month });
+  }
+  return ends.sort((a, b) => a.lastDuesDate.localeCompare(b.lastDuesDate));
 }
 
-export function occupancyRate(occupied: number, roomsTotal: number): number | null {
-  if (roomsTotal <= 0) return null;
-  return (occupied / roomsTotal) * 100;
+/** The last date an export can speak to: nothing after it has been billed yet. */
+export function billedHorizon(lines: readonly BilledLine[]): IsoDate | null {
+  return lines.reduce<IsoDate | null>((latest, l) => (latest === null || l.billedDate > latest ? l.billedDate : latest), null);
+}
+
+/**
+ * Tenancy ends per earnings month, which is the turnover count for that month.
+ *
+ * Pass the horizon from the whole export rather than letting it come from one
+ * property's own lines: a house that stopped billing early would otherwise
+ * judge itself against its own last day and report nobody as having left.
+ */
+export function turnoversByMonth(
+  lines: readonly BilledLine[],
+  exportHorizon?: IsoDate | null,
+): Map<MonthKey, number> {
+  const horizon = exportHorizon ?? billedHorizon(lines);
+  const counts = new Map<MonthKey, number>();
+  if (horizon === null) return counts;
+  for (const end of tenancyEnds(lines, horizon)) {
+    counts.set(end.earningsMonth, (counts.get(end.earningsMonth) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/**
+ * True while a month's turnover count can still rise: a resident billed within
+ * a week of the horizon may already have gone without the export showing it.
+ */
+export function turnoverProvisional(
+  lines: readonly BilledLine[],
+  month: MonthKey,
+  exportHorizon?: IsoDate | null,
+): boolean {
+  const horizon = exportHorizon ?? billedHorizon(lines);
+  if (horizon === null) return false;
+  return lines.some(
+    (l) =>
+      l.earningsMonth === month &&
+      l.reason === 'membership_dues' &&
+      l.amountCents < 0 &&
+      daysBetween(l.billedDate, horizon) < DUES_PERIOD_DAYS,
+  );
+}
+
+/**
+ * The stretch of a month an export can actually speak to.
+ *
+ * A weekly charge is raised in advance and pays for the seven days from the
+ * day it was raised, so a file whose last charge is the 24th has paid-for days
+ * running to the 30th. Beyond that nothing has been billed yet, and counting
+ * those days as vacant would report a live house as emptying every time an
+ * export was taken mid-month.
+ */
+export interface OccupancyWindow {
+  from: IsoDate;
+  to: IsoDate;
+  days: number;
+}
+
+export function occupancyWindow(month: MonthKey, horizon: IsoDate | null): OccupancyWindow {
+  const from = monthStart(month);
+  const end = monthEnd(month);
+  const covered = horizon === null ? end : addDays(horizon, DUES_PERIOD_DAYS - 1);
+  const to = covered < end ? covered : end;
+  return { from, to, days: to < from ? 0 : daysBetween(from, to) + 1 };
+}
+
+/**
+ * Room-days let in a window, allocated from the weeks that paid for them.
+ *
+ * Never bucketed by earnings month, which is the trap the first version fell
+ * into: a charge raised on 30 July pays for the first five days of August but
+ * is filed under July, so a room occupied all month showed only three of its
+ * four and a half weeks. Spreading each charge across the days it covers is
+ * phase-independent and gets the month boundary right.
+ *
+ * Days are counted per room, not per member, so a mid-month handover is one
+ * occupied room rather than two.
+ */
+export function roomDaysLet(lines: readonly BilledLine[], window: OccupancyWindow): number {
+  // A booking charged and then waived to nothing was never a tenancy and
+  // bought no days.
+  const net = netDuesBilledBy(lines, (l) => (l.roomNumber && l.memberId ? `${l.roomNumber}|${l.memberId}` : null));
+
+  const days = new Set<string>();
+  for (const line of lines) {
+    if (line.reason !== 'membership_dues' || line.amountCents >= 0) continue;
+    if (!line.roomNumber || !line.memberId) continue;
+    if ((net.get(`${line.roomNumber}|${line.memberId}`) ?? 0) <= 0) continue;
+
+    for (let offset = 0; offset < DUES_PERIOD_DAYS; offset += 1) {
+      const day = addDays(line.billedDate, offset);
+      if (day < window.from || day > window.to) continue;
+      days.add(`${line.roomNumber}|${day}`);
+    }
+  }
+  return days.size;
+}
+
+/** Occupancy as room-days let against room-days the house had to sell. */
+export function occupancyFromRoomDays(roomDays: number, roomsTotal: number, window: OccupancyWindow): number | null {
+  const available = roomsTotal * window.days;
+  if (available <= 0) return null;
+  return (roomDays / available) * 100;
 }
 
 /**
@@ -226,7 +393,12 @@ export interface PropertyMonth {
   propertyExternalId: string;
   earningsMonth: MonthKey;
   roomsTotal: number;
-  roomsOccupied: number;
+  /** Rooms someone was billed rent for at any point in the month. */
+  roomsLet: number;
+  /** Room-days someone was billed for, allocated from the weeks that paid for them. */
+  roomDaysLet: number;
+  /** Room-days the house had to sell over the stretch the export can speak to. */
+  roomDaysAvailable: number;
   grossCents: Cents;
   feesCents: Cents;
   /** Refunded booking fees and the like. Income, but not rent against a bill. */
@@ -259,7 +431,7 @@ export interface PropertyMonthMetrics {
 export const RAMP_OCCUPANCY_FLOOR = 70;
 
 export function metricsFor(pm: PropertyMonth): PropertyMonthMetrics {
-  const occupancy = occupancyRate(pm.roomsOccupied, pm.roomsTotal);
+  const occupancy = pm.roomDaysAvailable > 0 ? (pm.roomDaysLet / pm.roomDaysAvailable) * 100 : null;
 
   let outlierReason: PropertyMonthMetrics['outlierReason'] = null;
   if (pm.activeMonthIndex === 1) {
@@ -275,8 +447,7 @@ export function metricsFor(pm: PropertyMonth): PropertyMonthMetrics {
     occupancyRate: occupancy,
     collectionRate: pm.inFlight ? null : collectionRate(pm.netBilledCents, pm.grossCollectedCents),
     delinquencyCents: pm.inFlight ? 0 : delinquency(pm.netBilledCents, pm.grossCollectedCents),
-    hostEarningsPerOccupiedRoomCents:
-      pm.roomsOccupied > 0 ? roundCents(pm.hostEarningsCents / pm.roomsOccupied) : null,
+    hostEarningsPerOccupiedRoomCents: pm.roomsLet > 0 ? roundCents(pm.hostEarningsCents / pm.roomsLet) : null,
     outlier: outlierReason !== null,
     outlierReason,
   };

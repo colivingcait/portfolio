@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  residents,
-  turnovers,
   collectionRate,
   comparableMonths,
   delinquency,
@@ -9,10 +7,17 @@ import {
   inFlightMonth,
   metricsFor,
   netBilled,
-  occupancyRate,
-  roomsOccupied,
   trueRoomRate,
   type BilledLine,
+  netDuesBilled,
+  occupancyFromRoomDays,
+  occupancyWindow,
+  residentsBilled,
+  roomDaysLet,
+  roomsLet,
+  tenancyEnds,
+  turnoverProvisional,
+  turnoversByMonth,
   type CollectionLine,
   type PropertyMonth,
 } from '../padsplit';
@@ -61,7 +66,9 @@ function propertyMonth(over: Partial<PropertyMonth> = {}): PropertyMonth {
     propertyExternalId: '8299',
     earningsMonth: '2026-06',
     roomsTotal: 8,
-    roomsOccupied: 8,
+    roomsLet: 8,
+    roomDaysLet: 240,
+    roomDaysAvailable: 240,
     grossCents: cents(6_000),
     feesCents: cents(900),
     adjustmentsCents: 0,
@@ -113,42 +120,30 @@ describe('formulas (§6)', () => {
 
   it('returns null rather than dividing by zero', () => {
     expect(collectionRate(0, cents(500))).toBeNull();
-    expect(occupancyRate(4, 0)).toBeNull();
   });
 
-  it('counts distinct rooms with collected membership dues', () => {
-    const lines = [
-      collected({ roomExternalId: 'r1' }),
-      collected({ roomExternalId: 'r1' }), // same room paying twice
-      collected({ roomExternalId: 'r2' }),
-      collected({ roomExternalId: 'r3', billType: 'Late Fee' }), // not dues
-      collected({ roomExternalId: 'r4', category: 'adjustment' }), // not collected
-    ];
-    expect(roomsOccupied(lines)).toBe(2);
-    expect(occupancyRate(roomsOccupied(lines), 8)).toBe(25);
-  });
 });
 
 describe('outlier rule (§6)', () => {
   it('always excludes a property’s first active month', () => {
-    const m = metricsFor(propertyMonth({ activeMonthIndex: 1, roomsOccupied: 8 }));
+    const m = metricsFor(propertyMonth({ activeMonthIndex: 1 }));
     expect(m.outlier).toBe(true);
     expect(m.outlierReason).toBe('first_active_month');
   });
 
   it('excludes a second active month below 70% occupancy', () => {
-    const m = metricsFor(propertyMonth({ activeMonthIndex: 2, roomsTotal: 8, roomsOccupied: 5 })); // 62.5%
+    const m = metricsFor(propertyMonth({ activeMonthIndex: 2, roomDaysLet: 150 })); // 62.5%
     expect(m.outlier).toBe(true);
     expect(m.outlierReason).toBe('second_month_low_occupancy');
   });
 
   it('keeps a second active month at or above 70% occupancy', () => {
-    const m = metricsFor(propertyMonth({ activeMonthIndex: 2, roomsTotal: 8, roomsOccupied: 6 })); // 75%
+    const m = metricsFor(propertyMonth({ activeMonthIndex: 2, roomDaysLet: 180 })); // 75%
     expect(m.outlier).toBe(false);
   });
 
   it('keeps later months regardless of occupancy', () => {
-    expect(metricsFor(propertyMonth({ activeMonthIndex: 3, roomsOccupied: 2 })).outlier).toBe(false);
+    expect(metricsFor(propertyMonth({ activeMonthIndex: 3, roomDaysLet: 60 })).outlier).toBe(false);
   });
 
   it('never rates the in-flight month, so it is never compared to a completed one', () => {
@@ -160,7 +155,7 @@ describe('outlier rule (§6)', () => {
   it('drops both outliers and the in-flight month from comparable months', () => {
     const months = [
       propertyMonth({ earningsMonth: '2026-05', activeMonthIndex: 1 }),
-      propertyMonth({ earningsMonth: '2026-06', activeMonthIndex: 2, roomsOccupied: 4 }),
+      propertyMonth({ earningsMonth: '2026-06', activeMonthIndex: 2, roomDaysLet: 120 }),
       propertyMonth({ earningsMonth: '2026-07', activeMonthIndex: 3 }),
       propertyMonth({ earningsMonth: '2026-08', activeMonthIndex: 4, inFlight: true }),
     ];
@@ -171,19 +166,19 @@ describe('outlier rule (§6)', () => {
 describe('true room rate (§6)', () => {
   it('is the median of host earnings per occupied room across usable months', () => {
     const months = [
-      propertyMonth({ earningsMonth: '2026-04', activeMonthIndex: 3, roomsOccupied: 8, hostEarningsCents: cents(4_800) }), // 600
-      propertyMonth({ earningsMonth: '2026-05', activeMonthIndex: 4, roomsOccupied: 8, hostEarningsCents: cents(5_600) }), // 700
-      propertyMonth({ earningsMonth: '2026-06', activeMonthIndex: 5, roomsOccupied: 8, hostEarningsCents: cents(6_400) }), // 800
+      propertyMonth({ earningsMonth: '2026-04', activeMonthIndex: 3, roomsLet: 8, hostEarningsCents: cents(4_800) }), // 600
+      propertyMonth({ earningsMonth: '2026-05', activeMonthIndex: 4, roomsLet: 8, hostEarningsCents: cents(5_600) }), // 700
+      propertyMonth({ earningsMonth: '2026-06', activeMonthIndex: 5, roomsLet: 8, hostEarningsCents: cents(6_400) }), // 800
     ];
     expect(trueRoomRate(months)).toBe(cents(700));
   });
 
   it('excludes divesting months, first months and the in-flight month', () => {
     const months = [
-      propertyMonth({ earningsMonth: '2026-04', activeMonthIndex: 1, roomsOccupied: 8, hostEarningsCents: cents(800) }),
-      propertyMonth({ earningsMonth: '2026-05', activeMonthIndex: 4, roomsOccupied: 8, hostEarningsCents: cents(5_600) }),
-      propertyMonth({ earningsMonth: '2026-06', activeMonthIndex: 5, divesting: true, roomsOccupied: 8, hostEarningsCents: cents(1_600) }),
-      propertyMonth({ earningsMonth: '2026-07', activeMonthIndex: 6, inFlight: true, roomsOccupied: 8, hostEarningsCents: cents(2_400) }),
+      propertyMonth({ earningsMonth: '2026-04', activeMonthIndex: 1, roomsLet: 8, hostEarningsCents: cents(800) }),
+      propertyMonth({ earningsMonth: '2026-05', activeMonthIndex: 4, roomsLet: 8, hostEarningsCents: cents(5_600) }),
+      propertyMonth({ earningsMonth: '2026-06', activeMonthIndex: 5, divesting: true, roomsLet: 8, hostEarningsCents: cents(1_600) }),
+      propertyMonth({ earningsMonth: '2026-07', activeMonthIndex: 6, inFlight: true, roomsLet: 8, hostEarningsCents: cents(2_400) }),
     ];
     expect(trueRoomRate(months)).toBe(cents(700));
   });
@@ -193,81 +188,161 @@ describe('true room rate (§6)', () => {
   });
 });
 
-describe('dues that get reversed', () => {
-  // Two different things make this shape and the export cannot tell them
-  // apart: a booking request that never became a move-in, and a resident moved
-  // between rooms. Netting handles both — the reversed side drops out, the
-  // side that kept the money counts — so neither needs identifying.
-  // Counting any dues line as occupancy instead put people in rooms they never
-  // took: Glen Mora read 7 of 8 rooms in a month it had 5.
-  const reversal = (room: string, member: string, dollars: number) => [
-    collected({ roomExternalId: room, memberId: member, amountCents: cents(dollars) }),
-    collected({ roomExternalId: room, memberId: member, amountCents: cents(-dollars) }),
-  ];
+/**
+ * Occupancy and turnover off the billed file (§6).
+ *
+ * The shapes here are the ones the real export produces, taken from a month of
+ * it: a weekly dues charge, a per-day refund when someone leaves mid-week, a
+ * booking waived to nothing when it falls through, and a tenancy that ends by
+ * simply not being billed again.
+ */
+describe('occupancy and turnover, read off what was billed', () => {
+  const week = (day: string, over: Partial<BilledLine> = {}) =>
+    billed({ billedDate: `2026-06-${day}`, amountCents: cents(-243), ...over });
 
-  it('does not count a room whose only dues were reversed', () => {
-    expect(roomsOccupied(reversal('room-1', 'm1', 218))).toBe(0);
-  });
-
-  it('still counts a room where the dues stuck', () => {
-    expect(roomsOccupied([collected({ roomExternalId: 'room-1', memberId: 'm1' })])).toBe(1);
-  });
-
-  it('counts a room once when the reversal is followed by someone who stayed', () => {
+  it('nets a fallen-through booking to nothing, so it never was a tenancy', () => {
     const lines = [
-      ...reversal('room-1', 'ghost', 218),
-      collected({ roomExternalId: 'room-1', memberId: 'real', amountCents: cents(700) }),
+      week('12', { memberId: 'ghost', roomNumber: '2' }),
+      billed({
+        billedDate: '2026-06-13',
+        memberId: 'ghost',
+        roomNumber: '2',
+        reason: 'waiving_membership_dues',
+        kind: 'concession',
+        amountCents: cents(243),
+      }),
     ];
-    expect(roomsOccupied(lines)).toBe(1);
-    expect(residents(lines)).toBe(1);
-    expect(turnovers(lines)).toBe(0);
+    expect(netDuesBilled(lines)).toBe(0);
+    expect(roomsLet(lines)).toBe(0);
+    expect(residentsBilled(lines)).toBe(0);
   });
 
-  it('counts a genuine change of occupant as one turnover', () => {
+  it('keeps a part-week: a day refunded on the way out is a day less occupied', () => {
+    // $243 a week is $34.71 a day. One day back means six days held.
     const lines = [
-      collected({ roomExternalId: 'room-1', memberId: 'left', amountCents: cents(300) }),
-      collected({ roomExternalId: 'room-1', memberId: 'arrived', amountCents: cents(400) }),
+      week('07'),
+      billed({ billedDate: '2026-06-10', reason: 'adjustment', kind: 'concession', amountCents: cents(34.71) }),
     ];
-    expect(residents(lines)).toBe(2);
-    expect(turnovers(lines)).toBe(1);
+    expect(netDuesBilled(lines)).toBe(cents(208.29));
   });
 
-  it('keeps a member whose payment PadSplit kept entirely as a booking fee', () => {
-    // They did move in; the host simply earned nothing that month. That is a
-    // fact about the money, not about whether the room was occupied.
+  it('leaves fines out of rent — they say nothing about whether a room was let', () => {
     const lines = [
-      collected({ roomExternalId: 'room-1', memberId: 'm1', amountCents: cents(104), hostEarningsCents: 0, bookingFeeCents: cents(-104) }),
+      week('07'),
+      billed({ billedDate: '2026-06-08', reason: 'overdue_balance', kind: 'fine', amountCents: cents(-25) }),
+      billed({ billedDate: '2026-06-08', reason: 'administrative', kind: 'fee', amountCents: cents(-15) }),
     ];
-    expect(roomsOccupied(lines)).toBe(1);
-    expect(residents(lines)).toBe(1);
+    expect(netDuesBilled(lines)).toBe(cents(243));
   });
 
-  it('ignores anything that is not dues, and anything not collected', () => {
-    expect(roomsOccupied([collected({ roomExternalId: 'room-9', billType: 'Late Fees' })])).toBe(0);
-    expect(roomsOccupied([collected({ roomExternalId: 'room-9', category: 'adjustment' })])).toBe(0);
-  });
-});
-
-describe('a resident moved between rooms', () => {
-  // The real case this was found on: dues charged against the old room and
-  // reversed there, with the money landing on the new room's bill. The person
-  // is one resident, not two, and belongs to the room that kept the money.
-  const lines = [
-    collected({ roomExternalId: 'room-5', memberId: 'corey', amountCents: cents(218) }),
-    collected({ roomExternalId: 'room-5', memberId: 'corey', amountCents: cents(-218) }),
-    collected({ roomExternalId: 'room-6', memberId: 'corey', amountCents: cents(218) }),
-    collected({ roomExternalId: 'room-6', memberId: 'corey', amountCents: cents(222) }),
-  ];
-
-  it('counts one occupied room, not two', () => {
-    expect(roomsOccupied(lines)).toBe(1);
+  it('credits a week raised in the previous month to the days it pays for', () => {
+    // The trap the first version fell into: this charge is filed under July
+    // but pays for 1-5 August.
+    const july = billed({ earningsMonth: '2026-07', billedDate: '2026-07-30', amountCents: cents(-169) });
+    const window = occupancyWindow('2026-08', '2026-08-24');
+    expect(roomDaysLet([july], window)).toBe(5);
   });
 
-  it('counts one resident, not two', () => {
-    expect(residents(lines)).toBe(1);
+  it('counts a room once when two residents share the month', () => {
+    const handover = [
+      billed({ billedDate: '2026-06-01', memberId: 'out' }),
+      billed({ billedDate: '2026-06-05', memberId: 'in' }), // overlaps by three days
+    ];
+    const window = occupancyWindow('2026-06', '2026-06-30');
+    expect(roomDaysLet(handover, window)).toBe(11); // 1-11 June, not 14
   });
 
-  it('is not a turnover — nobody left and nobody arrived', () => {
-    expect(turnovers(lines)).toBe(0);
+  it('buys no days for a booking that fell through', () => {
+    const ghost = [
+      billed({ billedDate: '2026-06-01', memberId: 'ghost', roomNumber: '3' }),
+      billed({
+        billedDate: '2026-06-02',
+        memberId: 'ghost',
+        roomNumber: '3',
+        reason: 'waiving_membership_dues',
+        kind: 'concession',
+        amountCents: cents(700),
+      }),
+    ];
+    expect(roomDaysLet(ghost, occupancyWindow('2026-06', '2026-06-30'))).toBe(0);
+  });
+
+  it('stops the window where the export stops billing, not at month end', () => {
+    // Last charge on the 24th pays through the 30th; nothing beyond it is
+    // vacant, it is simply unbilled.
+    expect(occupancyWindow('2026-08', '2026-08-24')).toEqual({ from: '2026-08-01', to: '2026-08-30', days: 30 });
+    expect(occupancyWindow('2026-08', '2026-08-31')).toEqual({ from: '2026-08-01', to: '2026-08-31', days: 31 });
+    expect(occupancyWindow('2026-06', null)).toEqual({ from: '2026-06-01', to: '2026-06-30', days: 30 });
+  });
+
+  it('measures a partly-let house against the days it could have sold', () => {
+    const window = occupancyWindow('2026-08', '2026-08-24'); // 30 days
+    expect(occupancyFromRoomDays(203, 8, window)).toBeCloseTo(84.6, 1);
+    expect(occupancyFromRoomDays(0, 8, window)).toBe(0);
+    expect(occupancyFromRoomDays(240, 0, window)).toBeNull();
+  });
+
+  describe('a turnover is a tenancy ending', () => {
+    // Two residents of room 1: one stops being billed mid-month, one carries on.
+    const leaver = [week('01'), week('08')];
+    const stayer = [
+      week('01', { memberId: 'm2', roomNumber: '2' }),
+      week('08', { memberId: 'm2', roomNumber: '2' }),
+      week('15', { memberId: 'm2', roomNumber: '2' }),
+      week('22', { memberId: 'm2', roomNumber: '2' }),
+    ];
+
+    it('sees the week that was never billed', () => {
+      const ends = tenancyEnds([...leaver, ...stayer], '2026-06-24');
+      expect(ends.map((e) => e.memberId)).toEqual(['m1']);
+      expect(ends[0].lastDuesDate).toBe('2026-06-08');
+    });
+
+    it('will not judge a resident whose next charge is not yet due', () => {
+      // Horizon four days after the last charge: nothing can be concluded.
+      expect(tenancyEnds([...leaver, ...stayer], '2026-06-12')).toEqual([]);
+    });
+
+    it('counts a move between rooms, because the room they left had to be re-let', () => {
+      const moved = [
+        week('01', { roomNumber: '5', roomExternalId: 'room-5' }),
+        week('08', { roomNumber: '2', roomExternalId: 'room-2' }),
+        week('15', { roomNumber: '2', roomExternalId: 'room-2' }),
+        week('22', { roomNumber: '2', roomExternalId: 'room-2' }), // still there at the horizon
+      ];
+      const ends = tenancyEnds(moved, '2026-06-24');
+      expect(ends.map((e) => e.roomNumber)).toEqual(['5']);
+    });
+
+    it('does not count a booking that fell through as somebody leaving', () => {
+      const ghost = [
+        week('01', { memberId: 'ghost', roomNumber: '3' }),
+        billed({
+          billedDate: '2026-06-02',
+          memberId: 'ghost',
+          roomNumber: '3',
+          reason: 'waiving_membership_dues',
+          kind: 'concession',
+          amountCents: cents(243),
+        }),
+      ];
+      expect(tenancyEnds(ghost, '2026-06-24')).toEqual([]);
+    });
+
+    it('attributes the turnover to the month of the last week billed', () => {
+      const counts = turnoversByMonth([...leaver, ...stayer], '2026-06-24');
+      expect(counts.get('2026-06')).toBe(1);
+    });
+
+    it('takes the horizon from the whole export, not one house’s last day', () => {
+      // Left to itself this house would judge nobody as gone.
+      expect(turnoversByMonth(leaver).get('2026-06')).toBeUndefined();
+      expect(turnoversByMonth(leaver, '2026-06-24').get('2026-06')).toBe(1);
+    });
+
+    it('says when the count can still rise', () => {
+      expect(turnoverProvisional([...leaver, ...stayer], '2026-06', '2026-06-24')).toBe(true);
+      expect(turnoverProvisional(leaver, '2026-06', '2026-06-24')).toBe(false);
+    });
   });
 });

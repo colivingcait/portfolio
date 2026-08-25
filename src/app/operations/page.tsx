@@ -34,8 +34,14 @@ export default async function OperationsPage({
   }
 
   const sum = (pick: (row: (typeof data.rows)[number]) => number) => data.rows.reduce((total, row) => total + pick(row), 0);
-  const roomsOccupied = sum((r) => r.roomsOccupied);
+  const roomsLetTotal = sum((r) => r.roomsLet);
   const roomsTotal = sum((r) => r.roomsTotal);
+  // Occupancy is room-days let against room-days available — never an average
+  // of the houses' rates, and never a count of rooms.
+  const roomDaysAvailable = sum((r) => r.roomDaysAvailable);
+  const occupancy = roomDaysAvailable > 0 ? (sum((r) => r.roomDaysLet) / roomDaysAvailable) * 100 : null;
+  const turnoverTotal = sum((r) => r.turnovers);
+  const turnoverProvisional = data.rows.some((r) => r.turnoversProvisional);
 
   // Colour follows the house, fixed everywhere, so hiding one series never
   // repaints the others.
@@ -79,8 +85,8 @@ export default async function OperationsPage({
     platformFees: total((rows) => add(rows, (r) => -r.feesCents)),
     payout: total((rows) => add(rows, (r) => r.payoutCents)),
     occupancy: total((rows) => {
-      const capacity = add(rows, (r) => r.roomsTotal);
-      return capacity ? (add(rows, (r) => r.roomsOccupied) / capacity) * 100 : null;
+      const available = add(rows, (r) => r.roomDaysAvailable);
+      return available > 0 ? (add(rows, (r) => r.roomDaysLet) / available) * 100 : null;
     }),
     turnovers: total((rows) => add(rows, (r) => r.turnovers)),
     collectionRate: total((rows) => {
@@ -90,7 +96,7 @@ export default async function OperationsPage({
     }),
     delinquency: total((rows) => (settled(rows) ? add(rows, (r) => r.metrics.delinquencyCents) : null)),
     perRoom: total((rows) => {
-      const filled = add(rows, (r) => r.roomsOccupied);
+      const filled = add(rows, (r) => r.roomsLet);
       return filled ? add(rows, (r) => r.hostEarningsCents) / filled : null;
     }),
   };
@@ -101,10 +107,11 @@ export default async function OperationsPage({
       id: row.propertyId,
       name: row.propertyName,
       color: colour,
-      roomsOccupied: row.roomsOccupied,
+      roomsLet: row.roomsLet,
       roomsTotal: row.roomsTotal,
       occupancyRate: row.metrics.occupancyRate,
       turnovers: row.turnovers,
+      turnoversProvisional: row.turnoversProvisional,
       membersActive: row.membersActive,
       netBilledCents: row.netBilledCents,
       grossCollectedCents: row.grossCollectedCents,
@@ -152,6 +159,16 @@ export default async function OperationsPage({
           is excluded from the true room rate for the same reason, and its second if occupancy was under 70%: a
           half-filled ramp-up month would drag down a figure meant to describe the house running normally.
         </div>
+        <div className="mt-1.5">
+          <strong>Occupancy and turnover are read off what was billed, never off what was paid.</strong> PadSplit
+          raises dues weekly in advance, so each charge is spread across the seven days it pays for and occupancy is
+          room-days let against room-days available — a room let for nine days of a month counts as nine days, and a
+          week raised on 30 July is credited to August rather than to July. The most recent month is measured only to
+          the last day the export has billed, because days nobody has been charged for yet are not vacant days. A
+          turnover is a tenancy ending, found where the next week&apos;s charge was due before the export was taken and
+          never came; that catches a resident who left with nobody lined up, which counting people per room could not.
+          Whether anyone then paid is the collection rate&apos;s job, and is deliberately a separate number.
+        </div>
       </Explainer>
 
       <div className="mb-5 flex flex-wrap items-center gap-1 text-[12px]">
@@ -178,12 +195,20 @@ export default async function OperationsPage({
         <Stat label="Gross collected" value={formatCents(sum((r) => r.grossCollectedCents))} hint={`Billed ${formatCents(sum((r) => r.netBilledCents))}`} />
         <Stat label="Host earnings" value={formatCents(sum((r) => r.hostEarningsCents))} hint="Collected, less both PadSplit fees." />
         <Stat label="PadSplit fees" value={formatCents(-sum((r) => r.feesCents))} hint={`${formatCents(-sum((r) => r.bookingFeesCents))} of it booking fees`} />
-        <Stat label="Occupancy" value={roomsTotal ? `${((roomsOccupied / roomsTotal) * 100).toFixed(0)}%` : '—'} hint={`${roomsOccupied} of ${roomsTotal} rooms filled`} />
+        <Stat
+          label="Occupancy"
+          value={occupancy === null ? '—' : `${occupancy.toFixed(0)}%`}
+          hint={`Room-days let against room-days available · ${roomsLetTotal} of ${roomsTotal} rooms let at some point`}
+        />
         <Stat
           label="Turnovers"
-          value={String(sum((r) => r.turnovers))}
-          hint="Rooms that changed hands this month."
-          tone={sum((r) => r.turnovers) > houseNames.length * 2 ? 'bad' : 'muted'}
+          value={turnoverProvisional ? `${turnoverTotal}+` : String(turnoverTotal)}
+          hint={
+            turnoverProvisional
+              ? 'Tenancies that ended. Still rising — a move-out in the export’s last week is not yet visible.'
+              : 'Tenancies that ended this month.'
+          }
+          tone={turnoverTotal > houseNames.length * 2 ? 'bad' : 'muted'}
         />
         <Stat
           label="Outstanding"

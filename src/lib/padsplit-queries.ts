@@ -4,10 +4,15 @@ import { requireIsoDate } from './mappers';
 import {
   MEMBERSHIP_DUES,
   metricsFor,
-  residents,
-  roomsOccupied,
-  turnovers,
+  occupancyWindow,
+  residentsBilled,
+  roomDaysLet,
+  roomsLet,
+  turnoverProvisional,
+  turnoversByMonth,
   trueRoomRate,
+  type BilledKind,
+  type BilledLine,
   type PropertyMonth,
   type PropertyMonthMetrics,
 } from './engine/padsplit';
@@ -20,10 +25,15 @@ export interface OperationsRow extends PropertyMonth {
   /** Straight off summary.csv, which is authoritative for the money. */
   bookingFeesCents: number;
   serviceFeesCents: number;
-  /** Distinct people who paid in the month. More than rooms means turnover. */
+  /** Distinct people billed rent in the month: who actually lived there. */
   membersActive: number;
-  /** People beyond one per occupied room — rooms that changed hands. */
+  /** Tenancies that ended in the month — rooms that emptied. */
   turnovers: number;
+  /**
+   * True while the count can still rise: a resident billed within a week of
+   * the export's horizon may already have gone without the file showing it.
+   */
+  turnoversProvisional: boolean;
   /** Charges raised this month, and what has since been collected against them. */
   cohortChargedCents: number;
   cohortCollectedCents: number;
@@ -114,29 +124,67 @@ export async function getOperations(monthParam?: string): Promise<OperationsData
     paidByBill.set(line.billId, (paidByBill.get(line.billId) ?? 0) + line.amountCents);
   }
 
+  // Occupancy and turnover come off the billed file, and both need every month
+  // a property has, not just the one being rendered: a room's asking rate is
+  // the median charge across its whole history, and a tenancy that ended is
+  // only visible from the week that was never billed.
+  const asBilledLine = (line: (typeof billed)[number]): BilledLine => ({
+    billId: line.billId,
+    propertyExternalId: line.propertyExternalId,
+    roomExternalId: line.roomExternalId,
+    roomNumber: line.roomNumber,
+    memberId: line.memberId,
+    memberName: line.memberName,
+    earningsMonth: line.earningsMonth,
+    billedDate: requireIsoDate(line.billedDate),
+    billType: line.billType,
+    reason: line.reason,
+    kind: line.kind as BilledKind,
+    amountCents: line.amountCents,
+  });
+
+  const billedByProperty = new Map<string, BilledLine[]>();
+  for (const line of billed) {
+    if (!line.propertyExternalId) continue;
+    const own = billedByProperty.get(line.propertyExternalId) ?? [];
+    own.push(asBilledLine(line));
+    billedByProperty.set(line.propertyExternalId, own);
+  }
+
+  // One horizon for the whole export. A house that stopped billing early must
+  // not be judged against its own last day, or nobody there ever left.
+  const horizon = [...billedByProperty.values()]
+    .flat()
+    .reduce<string | null>((latest, l) => (latest === null || l.billedDate > latest ? l.billedDate : latest), null);
+
+  const turnoverByProperty = new Map(
+    [...billedByProperty].map(([psid, lines]) => [psid, turnoversByMonth(lines, horizon)] as const),
+  );
+
   const build = (s: (typeof summaries)[number]): OperationsRow | null => {
     const property = byPsid.get(s.propertyExternalId);
     if (!property) return null;
 
-    const c = collected.filter((x) => x.propertyExternalId === s.propertyExternalId && x.earningsMonth === s.earningsMonth);
     const b = billed.filter((x) => x.propertyExternalId === s.propertyExternalId && x.earningsMonth === s.earningsMonth);
+    const ownBilled = b.map(asBilledLine);
+    const allBilled = billedByProperty.get(s.propertyExternalId) ?? [];
 
-    // Reversed bookings are netted out by the engine: a booking that fell
-    // through appears as a charge and its mirror, and counting either as a
-    // resident put people in rooms they never took.
-    const lines = c.map((line) => ({
-      ...line,
-      category: line.category === 'adjustment' ? ('adjustment' as const) : ('collected' as const),
-      createdDate: requireIsoDate(line.createdDate),
-    }));
-    const occupied = roomsOccupied(lines);
+    const let_ = roomsLet(ownBilled);
+    const roomsTotal = property.roomCount ?? let_;
     const charges = b.filter((x) => x.kind !== 'concession');
+
+    // Every month of this property's billing, because the week that pays for
+    // the first days of a month is raised in the month before it.
+    const window = occupancyWindow(s.earningsMonth, horizon);
+    const daysLet = roomDaysLet(allBilled, window);
 
     const pm: PropertyMonth = {
       propertyExternalId: s.propertyExternalId,
       earningsMonth: s.earningsMonth,
-      roomsTotal: property.roomCount ?? occupied,
-      roomsOccupied: occupied,
+      roomsTotal,
+      roomsLet: let_,
+      roomDaysLet: daysLet,
+      roomDaysAvailable: roomsTotal * window.days,
       grossCents: s.grossCents,
       feesCents: s.bookingFeesCents + s.serviceFeesCents,
       adjustmentsCents: s.adjustmentsCents,
@@ -156,8 +204,9 @@ export async function getOperations(monthParam?: string): Promise<OperationsData
       metrics: metricsFor(pm),
       bookingFeesCents: s.bookingFeesCents,
       serviceFeesCents: s.serviceFeesCents,
-      membersActive: residents(lines),
-      turnovers: turnovers(lines),
+      membersActive: residentsBilled(ownBilled),
+      turnovers: turnoverByProperty.get(s.propertyExternalId)?.get(s.earningsMonth) ?? 0,
+      turnoversProvisional: turnoverProvisional(allBilled, s.earningsMonth, horizon),
       cohortChargedCents: -charges.reduce((sum, x) => sum + x.amountCents, 0),
       cohortCollectedCents: charges.reduce((sum, x) => sum + (paidByBill.get(x.billId) ?? 0), 0),
     };

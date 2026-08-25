@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/db';
 import { Badge, Empty, Money, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
+import { RecomputeButton } from '@/components/RecomputeButton';
 import { StatementDropzone } from '@/components/StatementDropzone';
 import { PadSplitDropzone } from '@/components/PadSplitDropzone';
 import { DeleteStatementButton } from '@/components/DeleteStatementButton';
@@ -100,6 +101,13 @@ export default async function ImportsPage() {
         description="The four-file export, dropped together. Each file is recognised by its own columns, so the names and the order do not matter."
       >
         <PadSplitDropzone />
+      </Panel>
+
+      <Panel
+        title="Stored figures"
+        description="The dashboard reads monthly figures that were worked out when the data was imported, rather than recomputing them on every view. Rebuild them after a change to how a figure is derived — occupancy, collection rate, net cash — or the dashboard keeps quoting the old definition. Nothing is re-read from a file and nothing you have categorised is touched."
+      >
+        <RecomputeButton />
       </Panel>
 
       <Note tone="muted">

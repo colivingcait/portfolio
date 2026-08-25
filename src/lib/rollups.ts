@@ -6,7 +6,15 @@ import { balanceAtDate, debtServiceForMonth } from './engine/amortization';
 import { assemblePropertyRollup, deriveFromBank } from './engine/assemble';
 import { periodTotals, type ClassifiedTransaction } from './engine/bank';
 import { monthEnd, monthStart, type MonthKey } from './engine/dates';
-import { MEMBERSHIP_DUES } from './engine/padsplit';
+import {
+  billedHorizon,
+  occupancyFromRoomDays,
+  occupancyWindow,
+  roomDaysLet,
+  roomsLet,
+  type BilledKind,
+  type BilledLine,
+} from './engine/padsplit';
 
 /**
  * Rollups are materialized and recomputed on every import (§11).
@@ -61,20 +69,36 @@ export async function recomputePropertyMonth(propertyId: string, month: MonthKey
 
   let padsplit: Parameters<typeof assemblePropertyRollup>[0]['padsplit'] = null;
   if (summary) {
-    const lines = await prisma.collectionLine.findMany({
-      where: { propertyId, earningsMonth: summary.earningsMonth },
-      select: { roomExternalId: true, billType: true, category: true },
+    // Every month, not just this one: a room's asking rate is the median charge
+    // across its whole history, and occupancy is measured against it.
+    const allBilled = await prisma.billedLine.findMany({
+      where: { propertyId },
+      select: {
+        billId: true,
+        propertyExternalId: true,
+        roomExternalId: true,
+        roomNumber: true,
+        memberId: true,
+        memberName: true,
+        earningsMonth: true,
+        billedDate: true,
+        billType: true,
+        reason: true,
+        kind: true,
+        amountCents: true,
+      },
     });
-    const billedLines = await prisma.billedLine.findMany({
-      where: { propertyId, earningsMonth: summary.earningsMonth },
-      select: { amountCents: true },
+    const asBilledLine = (line: (typeof allBilled)[number]): BilledLine => ({
+      ...line,
+      billedDate: requireIsoDate(line.billedDate),
+      kind: line.kind as BilledKind,
     });
-    const rooms = new Set(
-      lines
-        .filter((l) => l.billType === MEMBERSHIP_DUES && l.category === 'collected' && l.roomExternalId)
-        .map((l) => l.roomExternalId as string),
-    );
-    const netBilledCents = -billedLines.reduce((total, line) => total + line.amountCents, 0);
+    const everyBilled = allBilled.map(asBilledLine);
+    const monthBilled = everyBilled.filter((l) => l.earningsMonth === summary.earningsMonth);
+
+    const roomsTotal = property.roomCount ?? 0;
+    const window = occupancyWindow(summary.earningsMonth, billedHorizon(everyBilled));
+    const netBilledCents = -monthBilled.reduce((total, line) => total + line.amountCents, 0);
     const inFlight = await prisma.padSplitMonthTotal.findFirst({
       where: { earningsMonth: summary.earningsMonth, inFlight: true },
     });
@@ -90,8 +114,11 @@ export async function recomputePropertyMonth(propertyId: string, month: MonthKey
       // involved; self-managed coliving has none, and it is derived elsewhere.
       pmFeeCents: 0,
       pmPaidOpexCents: 0,
-      roomsOccupied: rooms.size,
-      occupancyRate: property.roomCount ? (rooms.size / property.roomCount) * 100 : null,
+      roomsOccupied: roomsLet(monthBilled),
+      // The same definition the operations page uses, from the same engine:
+      // rent billed against the rent a full house would bill. Counting rooms
+      // that collected a dollar scored a room paying $178 of $880 as full.
+      occupancyRate: occupancyFromRoomDays(roomDaysLet(everyBilled, window), roomsTotal, window),
       // Withheld while the month is still collecting: a partial figure read as
       // a final one is worse than no figure.
       collectionRate: inFlight || netBilledCents === 0 ? null : (summary.grossCents / netBilledCents) * 100,
@@ -165,4 +192,39 @@ export async function recomputeMonths(propertyId: string, months: readonly Month
   for (const month of [...new Set(months)]) {
     await recomputePropertyMonth(propertyId, month);
   }
+}
+
+/**
+ * Rebuild every stored month for every property.
+ *
+ * The dashboard reads persisted rollups rather than recomputing on each view,
+ * which is right for a page that joins bank, platform and debt — but it means
+ * a change to how a figure is DERIVED leaves the stored ones stale, showing an
+ * old definition long after the code has moved on. This is the way back.
+ */
+export async function recomputeEverything(): Promise<{ properties: number; months: number }> {
+  const properties = await prisma.property.findMany({ select: { id: true } });
+
+  let months = 0;
+  for (const property of properties) {
+    const [statements, summaries] = await Promise.all([
+      prisma.monthlyPropertyRollup.findMany({
+        where: { propertyId: property.id },
+        select: { month: true },
+      }),
+      prisma.summaryLine.findMany({
+        where: { propertyId: property.id },
+        select: { payoutMonth: true },
+      }),
+    ]);
+
+    const touched = new Set<MonthKey>([
+      ...statements.map((r) => r.month),
+      ...summaries.map((s) => s.payoutMonth),
+    ]);
+    await recomputeMonths(property.id, [...touched]);
+    months += touched.size;
+  }
+
+  return { properties: properties.length, months };
 }

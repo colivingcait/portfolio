@@ -26,10 +26,11 @@ export interface BreakdownProperty {
   id: string;
   name: string;
   color: string;
-  roomsOccupied: number;
+  roomsLet: number;
   roomsTotal: number;
   occupancyRate: number | null;
   turnovers: number;
+  turnoversProvisional: boolean;
   membersActive: number;
   netBilledCents: number;
   grossCollectedCents: number;
@@ -119,7 +120,7 @@ function PropertyCard({
             value={
               property.occupancyRate === null
                 ? '—'
-                : `${property.occupancyRate.toFixed(0)}% · ${property.roomsOccupied}/${property.roomsTotal}`
+                : `${property.occupancyRate.toFixed(0)}% · ${property.roomsLet}/${property.roomsTotal}`
             }
           />
         </span>
@@ -155,18 +156,22 @@ function PropertyCard({
             <Cell
               label="Occupancy"
               value={property.occupancyRate === null ? '—' : `${property.occupancyRate.toFixed(0)}%`}
-              hint={`${property.roomsOccupied} of ${property.roomsTotal} rooms`}
+              hint={`Room-days let against room-days available. ${property.roomsLet} of ${property.roomsTotal} rooms let at some point.`}
             />
             <Cell
               label="Turnovers"
-              value={String(property.turnovers)}
+              value={property.turnoversProvisional ? `${property.turnovers}+` : String(property.turnovers)}
               tone={property.turnovers > 2 ? 'bad' : 'muted'}
-              hint={`${property.membersActive} people paid across ${property.roomsOccupied} rooms.`}
+              hint={
+                property.turnoversProvisional
+                  ? `Tenancies that ended. ${property.membersActive} residents billed; the count can still rise.`
+                  : `Tenancies that ended. ${property.membersActive} residents billed this month.`
+              }
             />
             <Cell
               label="Per occupied room"
               value={property.perRoomCents === null ? '—' : formatCents(property.perRoomCents)}
-              hint="Host earnings over rooms filled."
+              hint="Host earnings over rooms let."
             />
             <Cell
               label="Fees kept"

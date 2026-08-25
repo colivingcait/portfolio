@@ -61,6 +61,12 @@ export function monthEnd(month: MonthKey): IsoDate {
   return `${month}-${String(daysInMonth(y, m)).padStart(2, '0')}`;
 }
 
+export function addDays(date: IsoDate, n: number): IsoDate {
+  const { y, m, d } = parts(date);
+  const shifted = new Date(Date.UTC(y, m - 1, d + n));
+  return shifted.toISOString().slice(0, 10);
+}
+
 export function daysBetween(from: IsoDate, to: IsoDate): number {
   const a = parts(from);
   const b = parts(to);
