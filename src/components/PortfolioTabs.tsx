@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 const TABS = [
   { href: '/', label: 'Overview' },
   { href: '/properties', label: 'Properties' },
+  { href: '/operations', label: 'Operations' },
 ];
 
 export function PortfolioTabs() {
