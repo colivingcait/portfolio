@@ -77,8 +77,19 @@ table {
   width: 100%;
 }
 
+/*
+ * In a layer on purpose. Unlayered element rules outrank Tailwind's utilities,
+ * so an unlayered `th { text-align: left }` silently beat every `text-right` a
+ * component asked for — numeric column headers sat over the wrong edge of
+ * their numbers. Layered, it is the default it was meant to be.
+ */
+@layer base {
+  th {
+    text-align: left;
+  }
+}
+
 th {
-  text-align: left;
   font-weight: 500;
   font-size: 11px;
   letter-spacing: 0.04em;

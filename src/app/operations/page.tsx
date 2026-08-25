@@ -3,8 +3,10 @@ import { getOperations } from '@/lib/padsplit-queries';
 import { PortfolioTabs } from '@/components/PortfolioTabs';
 import { Badge, Empty, Explainer, Money, Note, PageHeader, Panel, Pct, Td, Th } from '@/components/ui';
 import { formatCents } from '@/lib/engine/money';
-import { Legend, LineChart, RAMP, Sparkline, StackedBar, seriesColor } from '@/components/charts';
-import { HouseStrip, count, latestOf, money, percent, type Metric } from '@/components/HouseStrip';
+import { RAMP, StackedBar, seriesColor } from '@/components/charts';
+import { PortfolioChart } from '@/components/PortfolioChart';
+import { PropertyBreakdown, type BreakdownProperty } from '@/components/PropertyBreakdown';
+import { METRICS } from '@/lib/engine/metrics-catalog';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,66 +36,98 @@ export default async function OperationsPage({
   const sum = (pick: (row: (typeof data.rows)[number]) => number) => data.rows.reduce((total, row) => total + pick(row), 0);
   const roomsOccupied = sum((r) => r.roomsOccupied);
   const roomsTotal = sum((r) => r.roomsTotal);
-  const netBilled = sum((r) => r.netBilledCents);
-  const gross = sum((r) => r.grossCollectedCents);
 
-  // Each house's own series, one entry per metric. Nulls are gaps rather than
-  // zeroes: a house with no data for a month did not earn nothing that month,
-  // it simply was not there yet.
-  const metricsFor = (house: string): Metric[] => {
-    const own = data.history.filter((row) => row.propertyName === house);
-    const at = (month: string) => own.find((row) => row.earningsMonth === month) ?? null;
-    const series = (pick: (row: (typeof own)[number]) => number | null) =>
-      data.months.map((month) => ({ label: month, value: at(month) === null ? null : pick(at(month)!) }));
+  // Colour follows the house, fixed everywhere, so hiding one series never
+  // repaints the others.
+  const houseNames = [...new Set(data.history.map((row) => row.propertyName))].sort();
+  const houses = houseNames.map((name, index) => ({ name, color: seriesColor(index) }));
 
-    const earnings = series((row) => row.hostEarningsCents);
-    const collected = series((row) => row.grossCollectedCents);
-    // Fees arrive negative; a chart of what was kept reads better positive.
-    const fees = series((row) => -row.feesCents);
-    const occupancy = series((row) => row.metrics.occupancyRate);
-    const turnover = series((row) => row.turnovers);
-    const collection = series((row) => row.metrics.collectionRate);
+  // One value per month per house for every metric the chart can show, plus a
+  // portfolio line worked out from the underlying rooms and dollars rather than
+  // averaged out of the house lines — an average of four occupancy rates is not
+  // the portfolio's occupancy.
+  const at = (house: string, month: string) =>
+    data.history.find((row) => row.propertyName === house && row.earningsMonth === month) ?? null;
 
-    const latestRow = [...own].reverse()[0] ?? null;
-    const feeShare =
-      latestRow && latestRow.grossCollectedCents > 0
-        ? `${((-latestRow.feesCents / latestRow.grossCollectedCents) * 100).toFixed(0)}% of what was collected`
-        : undefined;
+  const perHouse = (pick: (row: (typeof data.history)[number]) => number | null) =>
+    Object.fromEntries(
+      houseNames.map((house) => [house, data.months.map((month) => (at(house, month) ? pick(at(house, month)!) : null))]),
+    );
 
-    return [
-      { label: 'Host earnings', points: earnings, format: money, latest: latestOf(earnings, money) },
-      { label: 'Collected', points: collected, format: money, latest: latestOf(collected, money) },
-      { label: 'PadSplit kept', points: fees, format: money, latest: latestOf(fees, money), hint: feeShare },
-      { label: 'Occupancy', points: occupancy, format: percent, latest: latestOf(occupancy, percent) },
-      {
-        label: 'Turnovers',
-        points: turnover,
-        format: count,
-        latest: latestOf(turnover, count),
-        tone: (latestRow?.turnovers ?? 0) > 2 ? 'bad' : 'muted',
-        hint: 'Rooms that changed hands. Every one costs a booking fee.',
-      },
-      {
-        label: 'Collection rate',
-        points: collection,
-        format: percent,
-        latest: latestOf(collection, percent),
-        hint: 'Blank while a month is still collecting.',
-      },
-    ];
+  const monthly = data.months.map((month) => data.history.filter((row) => row.earningsMonth === month));
+  const total = (pick: (rows: (typeof data.history)[number][]) => number | null) =>
+    monthly.map((rows) => (rows.length === 0 ? null : pick(rows)));
+  const add = (rows: (typeof data.history)[number][], pick: (row: (typeof rows)[number]) => number) =>
+    rows.reduce((running, row) => running + pick(row), 0);
+  const settled = (rows: (typeof data.history)[number][]) => rows.every((row) => !row.inFlight);
+
+  const values: Record<string, Record<string, (number | null)[]>> = {
+    hostEarnings: perHouse((r) => r.hostEarningsCents),
+    grossCollected: perHouse((r) => r.grossCollectedCents),
+    platformFees: perHouse((r) => -r.feesCents),
+    payout: perHouse((r) => r.payoutCents),
+    occupancy: perHouse((r) => r.metrics.occupancyRate),
+    turnovers: perHouse((r) => r.turnovers),
+    collectionRate: perHouse((r) => (r.inFlight ? null : r.metrics.collectionRate)),
+    delinquency: perHouse((r) => (r.inFlight ? null : r.metrics.delinquencyCents)),
+    perRoom: perHouse((r) => r.metrics.hostEarningsPerOccupiedRoomCents),
   };
 
-  // Colour follows the house, fixed across every chart, so filtering one out
-  // never repaints the others.
-  const houseNames = [...new Set(data.history.map((row) => row.propertyName))].sort();
-  const houseSeries = houseNames.map((name, index) => {
-    const own = data.history.filter((row) => row.propertyName === name);
-    const at = (month: string) => own.find((row) => row.earningsMonth === month) ?? null;
+  const totals: Record<string, (number | null)[]> = {
+    hostEarnings: total((rows) => add(rows, (r) => r.hostEarningsCents)),
+    grossCollected: total((rows) => add(rows, (r) => r.grossCollectedCents)),
+    platformFees: total((rows) => add(rows, (r) => -r.feesCents)),
+    payout: total((rows) => add(rows, (r) => r.payoutCents)),
+    occupancy: total((rows) => {
+      const capacity = add(rows, (r) => r.roomsTotal);
+      return capacity ? (add(rows, (r) => r.roomsOccupied) / capacity) * 100 : null;
+    }),
+    turnovers: total((rows) => add(rows, (r) => r.turnovers)),
+    collectionRate: total((rows) => {
+      if (!settled(rows)) return null;
+      const billed = add(rows, (r) => r.netBilledCents);
+      return billed ? (add(rows, (r) => r.grossCollectedCents) / billed) * 100 : null;
+    }),
+    delinquency: total((rows) => (settled(rows) ? add(rows, (r) => r.metrics.delinquencyCents) : null)),
+    perRoom: total((rows) => {
+      const filled = add(rows, (r) => r.roomsOccupied);
+      return filled ? add(rows, (r) => r.hostEarningsCents) / filled : null;
+    }),
+  };
+
+  const breakdown: BreakdownProperty[] = data.rows.map((row) => {
+    const colour = houses.find((h) => h.name === row.propertyName)?.color ?? seriesColor(0);
     return {
-      label: name,
-      color: seriesColor(index),
-      occupancy: data.months.map((month) => ({ label: month, value: at(month)?.metrics.occupancyRate ?? null })),
-      collection: data.months.map((month) => ({ label: month, value: at(month)?.metrics.collectionRate ?? null })),
+      id: row.propertyId,
+      name: row.propertyName,
+      color: colour,
+      roomsOccupied: row.roomsOccupied,
+      roomsTotal: row.roomsTotal,
+      occupancyRate: row.metrics.occupancyRate,
+      turnovers: row.turnovers,
+      membersActive: row.membersActive,
+      netBilledCents: row.netBilledCents,
+      grossCollectedCents: row.grossCollectedCents,
+      bookingFeesCents: row.bookingFeesCents,
+      serviceFeesCents: row.serviceFeesCents,
+      feesCents: row.feesCents,
+      hostEarningsCents: row.hostEarningsCents,
+      adjustmentsCents: row.adjustmentsCents,
+      payoutCents: row.payoutCents,
+      delinquencyCents: row.metrics.delinquencyCents,
+      collectionRate: row.metrics.collectionRate,
+      perRoomCents: row.metrics.hostEarningsPerOccupiedRoomCents,
+      inFlight: row.inFlight,
+      outlierReason: row.metrics.outlierReason,
+      rooms: data.rooms
+        .filter((room) => room.propertyId === row.propertyId)
+        .map((room) => ({
+          roomNumber: room.roomNumber,
+          byMonth: room.byMonth,
+          medianCents: room.medianCents,
+          lastCents: [...room.byMonth].reverse().find((value) => value !== null) ?? null,
+          people: room.people,
+        })),
     };
   });
 
@@ -140,11 +174,17 @@ export default async function OperationsPage({
         </Note>
       ) : null}
 
-      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-5">
-        <Stat label="Gross collected" value={formatCents(gross)} />
-        <Stat label="Host earnings" value={formatCents(sum((r) => r.hostEarningsCents))} hint={`${formatCents(-sum((r) => r.feesCents))} kept by PadSplit`} />
-        <Stat label="Payout" value={formatCents(sum((r) => r.payoutCents))} hint="What hits the bank next month." />
-        <Stat label="Occupancy" value={roomsTotal ? `${((roomsOccupied / roomsTotal) * 100).toFixed(0)}%` : '—'} hint={`${roomsOccupied} of ${roomsTotal} rooms`} />
+      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <Stat label="Gross collected" value={formatCents(sum((r) => r.grossCollectedCents))} hint={`Billed ${formatCents(sum((r) => r.netBilledCents))}`} />
+        <Stat label="Host earnings" value={formatCents(sum((r) => r.hostEarningsCents))} hint="Collected, less both PadSplit fees." />
+        <Stat label="PadSplit fees" value={formatCents(-sum((r) => r.feesCents))} hint={`${formatCents(-sum((r) => r.bookingFeesCents))} of it booking fees`} />
+        <Stat label="Occupancy" value={roomsTotal ? `${((roomsOccupied / roomsTotal) * 100).toFixed(0)}%` : '—'} hint={`${roomsOccupied} of ${roomsTotal} rooms filled`} />
+        <Stat
+          label="Turnovers"
+          value={String(sum((r) => r.turnovers))}
+          hint="Rooms that changed hands this month."
+          tone={sum((r) => r.turnovers) > houseNames.length * 2 ? 'bad' : 'muted'}
+        />
         <Stat
           label="Outstanding"
           value={formatCents(data.outstandingTotalCents)}
@@ -153,154 +193,18 @@ export default async function OperationsPage({
         />
       </div>
 
-      <Panel title={`${data.month} by property`}>
-        <div className="overflow-x-auto">
-          <table>
-            <thead>
-              <tr>
-                <Th>Property</Th>
-                <Th right>Rooms</Th>
-                <Th right>Occupancy</Th>
-                <Th right>Turnover</Th>
-                <Th right>Billed</Th>
-                <Th right>Collected</Th>
-                <Th right>Delinquency</Th>
-                <Th right>Collection</Th>
-                <Th right>PadSplit fees</Th>
-                <Th right>Host earnings</Th>
-                <Th right>Misc income</Th>
-                <Th right>Payout</Th>
-                <Th right>Per room</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.rows.map((row) => (
-                <tr key={row.propertyId} className="hover:bg-surface-2/50">
-                  <Td>
-                    <Link href={`/properties/${row.propertyId}`} className="hover:text-accent">
-                      {row.propertyName}
-                    </Link>
-                    {row.metrics.outlier ? (
-                      <Badge tone="warn">{row.metrics.outlierReason === 'first_active_month' ? 'first month' : 'ramping'}</Badge>
-                    ) : null}
-                  </Td>
-                  <Td right>
-                    <span className="num">{row.roomsOccupied}/{row.roomsTotal}</span>
-                  </Td>
-                  <Td right><Pct value={row.metrics.occupancyRate} digits={0} /></Td>
-                  <Td right>
-                    {row.turnovers === 0 ? (
-                      <span className="num text-muted">—</span>
-                    ) : (
-                      <span className={row.turnovers > 2 ? 'num text-bad' : 'num'} title={`${row.membersActive} people paid across ${row.roomsOccupied} rooms`}>
-                        {row.turnovers}
-                      </span>
-                    )}
-                  </Td>
-                  <Td right><Money cents={row.netBilledCents} muted /></Td>
-                  <Td right><Money cents={row.grossCollectedCents} /></Td>
-                  <Td right>
-                    {row.inFlight ? (
-                      <span className="num text-muted">—</span>
-                    ) : row.metrics.delinquencyCents > 0 ? (
-                      <span className="text-bad">
-                        <Money cents={row.metrics.delinquencyCents} />
-                      </span>
-                    ) : (
-                      // Negative delinquency is a house catching up on arrears.
-                      // Rendering it red would read as a problem; it is the
-                      // opposite of one.
-                      <span className="num text-muted" title="Collected more than was billed this month — catching up on arrears">
-                        caught up
-                      </span>
-                    )}
-                  </Td>
-                  <Td right>{row.inFlight ? <span className="num text-muted">—</span> : <Pct value={row.metrics.collectionRate} digits={0} />}</Td>
-                  <Td right><Money cents={row.feesCents} muted /></Td>
-                  <Td right><Money cents={row.hostEarningsCents} /></Td>
-                  <Td right>{row.adjustmentsCents ? <Money cents={row.adjustmentsCents} /> : <span className="num text-muted">—</span>}</Td>
-                  <Td right><Money cents={row.payoutCents} /></Td>
-                  <Td right><Money cents={row.metrics.hostEarningsPerOccupiedRoomCents ?? 0} muted /></Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <Panel
+        title="Portfolio over time"
+        description={`One chart, pointed wherever you need it. Pick a measure and a span; click a house in the legend to drop it out of the comparison. ${METRICS.length} measures across ${data.months.length} months.`}
+      >
+        <PortfolioChart months={data.months} houses={houses} values={values} totals={totals} />
       </Panel>
 
       <Panel
-        title="Each house, month by month"
-        description="Every measure for a house in one band. The money, then how full it was and how often it changed hands — the two that usually explain the money."
+        title={`Property breakdown · ${data.month}`}
+        description="Each house for the selected month. Open one for the full revenue flow and its rooms — the comparison that matters is between rooms under the same roof, where they differ by hundreds a month."
       >
-        <div className="space-y-6">
-          {houseNames.map((house, index) => (
-            <HouseStrip key={house} name={house} color={seriesColor(index)} metrics={metricsFor(house)} />
-          ))}
-        </div>
-      </Panel>
-
-      <Panel
-        title="What each room earns"
-        description="Host earnings per room, month by month. Grouped by house, because the comparison that matters is between rooms under the same roof: they differ by hundreds a month, and the ones that turn over most earn least."
-      >
-        <div className="space-y-5">
-          {houseNames.map((house, houseIndex) => {
-            const own = data.rooms.filter((room) => room.propertyName === house);
-            if (own.length === 0) return null;
-            const colour = seriesColor(houseIndex);
-            const earning = own.filter((room) => room.medianCents !== null).map((room) => room.medianCents as number);
-            const best = earning.length ? Math.max(...earning) : 0;
-
-            return (
-              <div key={house}>
-                <div className="mb-2 flex items-baseline justify-between border-b border-line pb-1.5">
-                  <span className="flex items-center gap-2 text-[13px] font-medium">
-                    <span className="inline-block h-2 w-2 rounded-[2px]" style={{ background: colour }} />
-                    {house}
-                  </span>
-                  <span className="text-[11px] text-muted">
-                    {own.length} rooms · best {formatCents(best)} a month
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-x-5 gap-y-3 sm:grid-cols-3 xl:grid-cols-4">
-                  {own.map((room) => (
-                    <div key={room.roomNumber} className="rounded-md border border-line px-2.5 py-2">
-                      <div className="flex items-baseline justify-between">
-                        <span className="text-[12px]">Room {room.roomNumber}</span>
-                        <span
-                          className={`text-[11px] ${room.people >= 4 ? 'text-bad' : room.people >= 3 ? 'text-warn' : 'text-muted'}`}
-                          title={`${room.people} ${room.people === 1 ? 'person' : 'different people'} across ${data.months.length} months`}
-                        >
-                          {room.people} {room.people === 1 ? 'person' : 'people'}
-                        </span>
-                      </div>
-                      <div className="mt-1">
-                        <Sparkline
-                          points={room.byMonth.map((value, i) => ({ label: data.months[i], value }))}
-                          color={colour}
-                          width={168}
-                          height={30}
-                          format={(v) => formatCents(v)}
-                        />
-                      </div>
-                      <div className="mt-0.5 flex items-baseline justify-between">
-                        <span className="num text-[12px]">
-                          {room.medianCents === null ? '—' : formatCents(room.medianCents)}
-                        </span>
-                        {room.medianCents !== null && best > 0 && room.medianCents < best * 0.7 ? (
-                          <span className="text-[10px] text-warn">
-                            {formatCents(best - room.medianCents)} under
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        <PropertyBreakdown properties={breakdown} months={data.months} />
       </Panel>
 
       <div className="grid gap-5 lg:grid-cols-2">
@@ -379,33 +283,6 @@ export default async function OperationsPage({
           )}
         </Panel>
       </div>
-
-      <Panel
-        title="Occupancy over time"
-        description="Each house across every month imported. One axis, so the lines are directly comparable."
-      >
-        <Legend series={houseSeries.map((s) => ({ label: s.label, color: s.color }))} />
-        <LineChart
-          series={houseSeries.map((s) => ({ ...s, points: s.occupancy }))}
-          labels={data.months}
-          suffix="%"
-          format={(v) => v.toFixed(0)}
-        />
-      </Panel>
-
-      <Panel
-        title="Collection rate over time"
-        description="Cash in against what was billed that month. Above 100% is a house catching up on arrears, not an error. Months still collecting are left out rather than shown low."
-      >
-        <Legend series={houseSeries.map((s) => ({ label: s.label, color: s.color }))} />
-        <LineChart
-          series={houseSeries.map((s) => ({ ...s, points: s.collection }))}
-          labels={data.months}
-          suffix="%"
-          format={(v) => v.toFixed(0)}
-          zeroBased={false}
-        />
-      </Panel>
 
       <Note tone="muted">
         Collection rate is money collected against what was billed <em>in that month</em>, and can exceed 100% when a
