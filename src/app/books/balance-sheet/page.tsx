@@ -87,7 +87,7 @@ export default async function BalanceSheetPage({
         <Note key={warning} tone="warn">
           {warning}{' '}
           {warning.includes('carried at zero') ? (
-            <Link href="/settings/valuations" className="underline">Add a valuation</Link>
+            <Link href="/properties" className="underline">Add a valuation</Link>
           ) : (
             <Link href="/imports" className="underline">Import a statement</Link>
           )}

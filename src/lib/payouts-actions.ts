@@ -106,30 +106,3 @@ export async function recordLoanPayment(input: {
   return { ok: true, recorded: 1 };
 }
 
-/** An investor putting money in, or getting it back. */
-export async function recordCapitalMovement(input: {
-  entityId: string;
-  propertyId: string | null;
-  kind: 'contribution' | 'return_of_capital';
-  date: string;
-  amountCents: number;
-  memo?: string;
-}): Promise<PayoutActionResult> {
-  if (!input.entityId) return { ok: false, error: 'Pick whose capital this is.' };
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) return { ok: false, error: 'A date is required.' };
-  if (input.amountCents <= 0) return { ok: false, error: 'The amount has to be more than nothing.' };
-
-  await prisma.capitalAccountEntry.create({
-    data: {
-      entityId: input.entityId,
-      propertyId: input.propertyId,
-      kind: input.kind,
-      date: fromIsoDate(input.date),
-      amountCents: input.amountCents,
-      memo: input.memo ?? null,
-    },
-  });
-
-  revalidatePath('/', 'layout');
-  return { ok: true, recorded: 1 };
-}

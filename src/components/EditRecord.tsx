@@ -6,7 +6,7 @@ import { getSelectOptions } from '@/lib/queries';
 import { MODELS, type ModelKey } from '@/lib/models';
 import { RecordForm } from '@/components/RecordForm';
 import { PageHeader, Panel } from '@/components/ui';
-import { fieldsFor, recordToInitial } from './helpers';
+import { fieldsFor, recordToInitial } from '@/lib/form-helpers';
 
 type Finder = (id: string) => Promise<Record<string, unknown> | null>;
 

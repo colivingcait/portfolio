@@ -1,7 +1,13 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getPropertyDetail, currentMonth } from '@/lib/queries';
+import { getPropertyDetail, getSelectOptions, currentMonth, todayIso } from '@/lib/queries';
 import { Badge, Empty, Money, Note, PageHeader, Panel, Pct, Td, Th } from '@/components/ui';
+import { RecordSection } from '@/components/RecordSection';
+import { RecordForm } from '@/components/RecordForm';
+import { RowActions } from '@/components/RowActions';
+import { fieldsFor } from '@/lib/form-helpers';
+import { SOURCE_LABELS, valuationAge, type ValuationSource } from '@/lib/engine/equity';
+import { requireIsoDate } from '@/lib/mappers';
 import { effectiveShare } from '@/lib/engine/ownership';
 import { comparabilityWarning, managementBoundaries, managementForMonth } from '@/lib/engine/management';
 import { addMonthsToMonth, monthRange } from '@/lib/engine/dates';
@@ -20,7 +26,7 @@ export default async function PropertyPage({
   const { month: monthParam } = await searchParams;
   const month = monthParam ?? currentMonth();
 
-  const detail = await getPropertyDetail(id, month);
+  const [detail, options] = await Promise.all([getPropertyDetail(id, month), getSelectOptions()]);
   if (!detail) notFound();
 
   const { property, ownership, interests, periods, loans, asOf } = detail;
@@ -32,6 +38,20 @@ export default async function PropertyPage({
   const share = ownership.viewerId
     ? effectiveShare(ownership.interests, ownership.viewerId, property.id, asOf)
     : null;
+
+  // Everything about this house is edited here. Spotting a wrong management
+  // period and then having to work out which of four other screens owns it was
+  // the single worst thing about the old shape.
+  // Everything for this house is entered here with the house already decided,
+  // so a select can neither ask nor be answered wrongly. Narrowing the option
+  // lists to this property also stops a lease picking another house's unit.
+  const back = `/properties/${id}`;
+  const scoped = {
+    ...options,
+    properties: options.properties.filter((option) => option.value === id),
+    units: property.units.map((unit) => ({ value: unit.id, label: unit.label })),
+  };
+  const lockToProperty = { propertyId: id };
 
   const debtBalance = loans.reduce((t, l) => t + l.balanceCents, 0);
   const debtService = loans.reduce((t, l) => t + l.debtServiceCents, 0);
@@ -51,9 +71,14 @@ export default async function PropertyPage({
           </>
         }
         actions={
-          <Link href={`/?month=${month}`} className="text-[13px] text-muted hover:text-text">
-            ← Portfolio
-          </Link>
+          <div className="flex items-center gap-3 text-[13px]">
+            <Link href={`/edit/property/${id}?back=${encodeURIComponent(back)}`} className="text-muted hover:text-text">
+              Edit property
+            </Link>
+            <Link href="/properties" className="text-muted hover:text-text">
+              ← Properties
+            </Link>
+          </div>
         }
       />
 
@@ -88,7 +113,18 @@ export default async function PropertyPage({
 
       {warning ? <Note tone="muted">{warning}</Note> : null}
 
-      <Panel title="Ownership" description={share && share.paths.length > 1 ? 'Held through more than one path; the effective share is the sum of the products along each.' : undefined}>
+      <RecordSection
+        title="Ownership"
+        description={share && share.paths.length > 1 ? 'Held through more than one path; the effective share is the sum of the products along each.' : 'Who owns this house. Distribution percent is recorded separately where this month\u2019s cash splits differently from the equity.'}
+        addLabel="+ Add an owner"
+        form={
+          <RecordForm
+            modelKey="ownershipInterest"
+            fields={fieldsFor('ownershipInterest', scoped)}
+            lock={{ ...lockToProperty, ownedType: 'property' }}
+          />
+        }
+      >
         {interests.length === 0 ? (
           <Empty>No interests recorded for this property.</Empty>
         ) : (
@@ -100,6 +136,7 @@ export default async function PropertyPage({
                 <Th right>Distribution</Th>
                 <Th>From</Th>
                 <Th>To</Th>
+                <Th />
               </tr>
             </thead>
             <tbody>
@@ -120,16 +157,25 @@ export default async function PropertyPage({
                       {interest.endDate ? interest.endDate.toISOString().slice(0, 10) : 'open'}
                     </span>
                   </Td>
+                  <Td>
+                    <RowActions modelKey="ownershipInterest" id={interest.id} back={back} />
+                  </Td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-      </Panel>
+      </RecordSection>
 
-      <Panel
+      <RecordSection
         title="Management history"
-        description={boundaries.length > 0 ? `${boundaries.length} boundary crossed in the trailing twelve months.` : undefined}
+        description={
+          boundaries.length > 0
+            ? `${boundaries.length} boundary crossed in the trailing twelve months. A month is priced with whatever was true then, so the dates decide which months carry a PM fee.`
+            : 'A dated record, not a setting. A month is priced with whatever was true then, so historical self-managed months carry no fee and no special case is needed anywhere.'
+        }
+        addLabel="+ Add a period"
+        form={<RecordForm modelKey="managementPeriod" fields={fieldsFor('managementPeriod', scoped)} lock={lockToProperty} />}
       >
         {property.managementPeriods.length === 0 ? (
           <Empty>No periods recorded, so no month for this property can be priced yet.</Empty>
@@ -142,6 +188,7 @@ export default async function PropertyPage({
                 <Th right>Fee</Th>
                 <Th>From</Th>
                 <Th>To</Th>
+                <Th />
               </tr>
             </thead>
             <tbody>
@@ -162,14 +209,22 @@ export default async function PropertyPage({
                       {period.endDate ? period.endDate.toISOString().slice(0, 10) : 'open'}
                     </span>
                   </Td>
+                  <Td>
+                    <RowActions modelKey="managementPeriod" id={period.id} back={back} />
+                  </Td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-      </Panel>
+      </RecordSection>
 
-      <Panel title="Loans">
+      <RecordSection
+        title="Loans"
+        description="Every note against this house. The ladder on Debt is the same records across the whole portfolio, sorted by maturity."
+        addLabel="+ Add a loan"
+        form={<RecordForm modelKey="loan" fields={fieldsFor('loan', scoped)} lock={lockToProperty} />}
+      >
         {loans.length === 0 ? (
           <Empty>No loans recorded.</Empty>
         ) : (
@@ -204,19 +259,27 @@ export default async function PropertyPage({
                     <span className="num">{loan.maturityDate}</span>
                   </Td>
                   <Td>
-                    <Link href={`/debt/${loan.id}`} className="text-[12px] text-muted hover:text-accent">
-                      Schedule
-                    </Link>
+                    <div className="flex items-center gap-3">
+                      <Link href={`/debt/${loan.id}`} className="text-[12px] text-muted hover:text-accent">
+                        Schedule
+                      </Link>
+                      <RowActions modelKey="loan" id={loan.id} back={back} />
+                    </div>
                   </Td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-      </Panel>
+      </RecordSection>
 
       {property.unitStructure === 'units' ? (
-        <Panel title="Leases">
+        <RecordSection
+          title="Leases"
+          description="A direct property has no PadSplit export, so without a lease there is no way to know what should have come in — only what did. Deposit held is a tenant\u2019s money and shows as a liability, never income."
+          addLabel="+ Add a lease"
+          form={<RecordForm modelKey="lease" fields={fieldsFor('lease', scoped)} lock={lockToProperty} />}
+        >
           {property.leases.length === 0 ? (
             <Empty>No leases recorded. Without one, expected-versus-received is not computable for a direct property.</Empty>
           ) : (
@@ -228,6 +291,7 @@ export default async function PropertyPage({
                   <Th right>Deposit held</Th>
                   <Th>From</Th>
                   <Th>To</Th>
+                  <Th />
                 </tr>
               </thead>
               <tbody>
@@ -248,13 +312,115 @@ export default async function PropertyPage({
                         {lease.endDate ? lease.endDate.toISOString().slice(0, 10) : 'open'}
                       </span>
                     </Td>
+                    <Td>
+                      <RowActions modelKey="lease" id={lease.id} back={back} />
+                    </Td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
-        </Panel>
+        </RecordSection>
       ) : null}
+
+      <RecordSection
+        title="Valuations"
+        description="Estimates are dated rather than overwritten, so history stays intact and any month can be read as of that month. Without one this house is carried at cost on the balance sheet, and cap rate cannot be computed at all."
+        addLabel="+ Add an estimate"
+        form={<RecordForm modelKey="valuation" fields={fieldsFor('valuation', scoped)} lock={lockToProperty} />}
+      >
+        {property.valuations.length === 0 ? (
+          <Empty>No estimate on record. This house is carried at cost, and at zero if there is no purchase price either.</Empty>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <Th>As of</Th>
+                <Th right>Value</Th>
+                <Th>Source</Th>
+                <Th right>Age</Th>
+                <Th />
+              </tr>
+            </thead>
+            <tbody>
+              {property.valuations.map((valuation) => {
+                const age = valuationAge(
+                  { id: valuation.id, propertyId: id, date: requireIsoDate(valuation.date), valueCents: valuation.valueCents, source: valuation.source as ValuationSource },
+                  asOf,
+                );
+                return (
+                  <tr key={valuation.id}>
+                    <Td>
+                      <span className="num">{requireIsoDate(valuation.date)}</span>
+                    </Td>
+                    <Td right>
+                      <Money cents={valuation.valueCents} />
+                    </Td>
+                    <Td>
+                      <span className="text-[12px] text-muted">
+                        {SOURCE_LABELS[valuation.source as ValuationSource] ?? valuation.source}
+                      </span>
+                    </Td>
+                    <Td right>
+                      {age?.stale ? (
+                        <Badge tone="warn">{age.days}d</Badge>
+                      ) : (
+                        <span className="num text-muted">{age?.days ?? 0}d</span>
+                      )}
+                    </Td>
+                    <Td>
+                      <RowActions modelKey="valuation" id={valuation.id} back={back} />
+                    </Td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </RecordSection>
+
+      <RecordSection
+        title="Bank accounts"
+        description="One account per property is what makes an import need no typing: the file is the property. The last four digits are what route an uploaded statement here."
+        addLabel="+ Add an account"
+        form={<RecordForm modelKey="bankAccount" fields={fieldsFor('bankAccount', scoped)} lock={lockToProperty} />}
+      >
+        {property.bankAccounts.length === 0 ? (
+          <Empty>
+            No account, so no statement can be imported for this house — and it shows as a zero balance on the{' '}
+            <Link href="/books/balance-sheet" className="underline">balance sheet</Link> rather than as a gap.
+          </Empty>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <Th>Label</Th>
+                <Th>Institution</Th>
+                <Th>Last 4</Th>
+                <Th>Active</Th>
+                <Th />
+              </tr>
+            </thead>
+            <tbody>
+              {property.bankAccounts.map((account) => (
+                <tr key={account.id}>
+                  <Td>{account.label}</Td>
+                  <Td>
+                    <span className="text-[12px] text-muted">{account.institution ?? '—'}</span>
+                  </Td>
+                  <Td>
+                    <span className="num">{account.last4 ?? '—'}</span>
+                  </Td>
+                  <Td>{account.active ? <Badge tone="good">active</Badge> : <Badge>closed</Badge>}</Td>
+                  <Td>
+                    <RowActions modelKey="bankAccount" id={account.id} back={back} />
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </RecordSection>
 
       <Note tone="muted">
         The twelve-month trend, room- or unit-level revenue and the occupancy and collection figures arrive with the

@@ -13,6 +13,16 @@ interface Props {
   initial?: Record<string, string | boolean | null>;
   submitLabel?: string;
   onSaved?: () => void;
+  /**
+   * Fields the page has already decided, by field name to value.
+   *
+   * A form on one property's page should not ask which property. Hiding the
+   * field is not enough on its own: the action parses the model's whole field
+   * list, so anything not submitted comes back as a required-field error. So
+   * locked fields are dropped from the rendering AND written into the form data
+   * on the way out. Unlike a default, a lock survives the reset after a save.
+   */
+  lock?: Record<string, string>;
 }
 
 const SPAN: Record<number, string> = {
@@ -50,7 +60,8 @@ function initialValues(
   return values;
 }
 
-export function RecordForm({ modelKey, fields, id = null, initial = {}, submitLabel, onSaved }: Props) {
+export function RecordForm({ modelKey, fields, id = null, initial = {}, submitLabel, onSaved, lock }: Props) {
+  const shown = lock ? fields.filter((field) => !(field.name in lock)) : fields;
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [values, setValues] = useState<Values>(() => initialValues(fields, initial, id === null));
@@ -81,7 +92,7 @@ export function RecordForm({ modelKey, fields, id = null, initial = {}, submitLa
     setSaved(false);
 
     const formData = new FormData();
-    for (const field of fields) {
+    for (const field of shown) {
       const value = values[field.name];
       if (field.type === 'checkbox') {
         if (value === true) formData.set(field.name, 'on');
@@ -89,6 +100,8 @@ export function RecordForm({ modelKey, fields, id = null, initial = {}, submitLa
         formData.set(field.name, String(value ?? ''));
       }
     }
+    // Locked values go in last, so the page's decision always wins.
+    for (const [name, value] of Object.entries(lock ?? {})) formData.set(name, value);
 
     startTransition(async () => {
       const result = await saveRecord(modelKey, id, formData);
@@ -97,8 +110,9 @@ export function RecordForm({ modelKey, fields, id = null, initial = {}, submitLa
         router.refresh();
         onSaved?.();
         // Clear only after a successful create, so the next record starts
-        // fresh. An edit keeps what is on screen, since that is now the truth.
-        if (!id) setValues(initialValues(fields, {}, true));
+        // fresh — but keep whatever the page supplied, or a form scoped to one
+        // property would forget which property it was on after the first save.
+        if (!id) setValues(initialValues(fields, initial, true));
       } else {
         setError({ message: result.error ?? 'Could not save', field: result.field });
       }
@@ -107,7 +121,7 @@ export function RecordForm({ modelKey, fields, id = null, initial = {}, submitLa
 
   return (
     <div ref={containerRef} className="grid grid-cols-12 gap-3">
-      {fields.map((field) => {
+      {shown.map((field) => {
         const value = values[field.name];
         const invalid = error?.field === field.name;
 

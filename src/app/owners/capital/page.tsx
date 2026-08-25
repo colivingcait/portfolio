@@ -2,9 +2,11 @@ import Link from 'next/link';
 import { prisma } from '@/lib/db';
 import { getSelectOptions } from '@/lib/queries';
 import { RecordForm } from '@/components/RecordForm';
-import { DeleteButton } from '@/components/DeleteButton';
+import { RowActions } from '@/components/RowActions';
 import { Empty, Explainer, Money, PageHeader, Panel, Td, Th } from '@/components/ui';
-import { withOptions } from '../_shared/helpers';
+import { withOptions } from '@/lib/form-helpers';
+import { capitalPositions } from '@/lib/engine/payouts';
+import { requireIsoDate } from '@/lib/mappers';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,14 +22,22 @@ export default async function CapitalPage() {
     propertyId: options.properties,
   });
 
-  const balances = entities
-    .map((entity) => {
-      const own = entries.filter((e) => e.entityId === entity.id);
-      const contributed = own.filter((e) => e.kind === 'contribution').reduce((t, e) => t + e.amountCents, 0);
-      const distributed = own.filter((e) => e.kind === 'distribution').reduce((t, e) => t + e.amountCents, 0);
-      return { entity, contributed, distributed, net: contributed - distributed };
-    })
-    .filter((row) => row.contributed !== 0 || row.distributed !== 0);
+  // The same function Payouts uses. Computing this inline here is how the two
+  // screens came to disagree: a profit distribution reduced the balance on one
+  // and not the other, for the same investor on the same day.
+  const names = new Map(entities.map((entity) => [entity.id, entity.name]));
+  const balances = capitalPositions(
+    entries.map((entry) => ({
+      entityId: entry.entityId,
+      propertyId: entry.propertyId,
+      kind: entry.kind,
+      date: requireIsoDate(entry.date),
+      amountCents: entry.amountCents,
+    })),
+  )
+    .map((position) => ({ ...position, name: names.get(position.entityId) ?? 'Unknown' }))
+    .filter((row) => row.contributedCents !== 0 || row.profitDistributedCents !== 0 || row.returnedCents !== 0)
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <>
@@ -52,28 +62,35 @@ export default async function CapitalPage() {
       </Panel>
 
       {balances.length > 0 ? (
-        <Panel title="Balances">
+        <Panel
+          title="Balances"
+          description="Profit paid does not reduce what is owed back on sale — only capital handed back does. These are the same figures Payouts shows."
+        >
           <table>
             <thead>
               <tr>
                 <Th>Owner</Th>
                 <Th right>Contributed</Th>
-                <Th right>Distributed</Th>
-                <Th right>Net</Th>
+                <Th right>Profit paid</Th>
+                <Th right>Capital returned</Th>
+                <Th right>Owed back on sale</Th>
               </tr>
             </thead>
             <tbody>
               {balances.map((row) => (
-                <tr key={row.entity.id}>
-                  <Td>{row.entity.name}</Td>
+                <tr key={row.entityId}>
+                  <Td>{row.name}</Td>
                   <Td right>
-                    <Money cents={row.contributed} />
+                    <Money cents={row.contributedCents} />
                   </Td>
                   <Td right>
-                    <Money cents={row.distributed} />
+                    <Money cents={row.profitDistributedCents} muted />
                   </Td>
                   <Td right>
-                    <Money cents={row.net} />
+                    {row.returnedCents ? <Money cents={row.returnedCents} /> : <span className="num text-muted">—</span>}
+                  </Td>
+                  <Td right>
+                    <Money cents={row.outstandingCents} />
                   </Td>
                 </tr>
               ))}
@@ -118,12 +135,7 @@ export default async function CapitalPage() {
                     <span className="text-[12px] text-muted">{entry.memo ?? '—'}</span>
                   </Td>
                   <Td>
-                    <div className="flex items-center gap-3">
-                      <Link href={`/settings/capital/${entry.id}`} className="text-[12px] text-muted hover:text-accent">
-                        Edit
-                      </Link>
-                      <DeleteButton modelKey="capitalAccountEntry" id={entry.id} />
-                    </div>
+                    <RowActions modelKey="capitalAccountEntry" id={entry.id} back="/owners/capital" />
                   </Td>
                 </tr>
               ))}

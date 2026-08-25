@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { PortfolioTabs } from '@/components/PortfolioTabs';
 import { getPortfolio, currentMonth } from '@/lib/queries';
 import { prisma } from '@/lib/db';
 import { Badge, Empty, Money, Note, PageHeader, Panel, Pct, Td, Th } from '@/components/ui';
@@ -78,6 +79,8 @@ export default async function PortfolioPage({
         }
       />
 
+      <PortfolioTabs />
+
       <div className="mb-4 flex flex-wrap items-center gap-2 text-[13px]">
         {VIEWS.map((kind) => (
           <Link
@@ -106,7 +109,7 @@ export default async function PortfolioPage({
       {view === 'my_share' && !data.ownership.viewerId ? (
         <Note tone="bad">
           No entity is marked as you, so there is nothing to compute a share from. Set “This is me” on your own
-          entity in <Link href="/settings/entities" className="underline">Settings → Entities</Link>.
+          entity in <Link href="/owners/entities" className="underline">Owners → Entities</Link>.
         </Note>
       ) : null}
 
@@ -133,7 +136,7 @@ export default async function PortfolioPage({
         {data.rows.length === 0 ? (
           <Empty>
             No properties yet. Add entities first, then properties, in{' '}
-            <Link href="/settings/entities" className="underline">Settings</Link>.
+            <Link href="/owners/entities" className="underline">Settings</Link>.
           </Empty>
         ) : (
           <div className="overflow-x-auto">

@@ -4,19 +4,19 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 /**
- * What is left in Settings once the portfolio moved out of it.
- *
- * A loan is not a setting, and neither is a property, an ownership stake or a
- * valuation — those are the subject matter, and they live with their results.
- * These two configure how the machine behaves: you come here when the tool
- * misfiles something, not when the business changes.
+ * Everything about who is owed what. Payouts is the monthly question, equity
+ * the eventual one, and the two records underneath — who owns what, and who
+ * actually funded it — are what both are computed from.
  */
 const TABS = [
-  { href: '/settings/rules', label: 'Payee rules' },
-  { href: '/settings/categories', label: 'Categories' },
+  { href: '/payouts', label: 'Payouts' },
+  { href: '/equity', label: 'Equity' },
+  { href: '/owners/capital', label: 'Capital accounts' },
+  { href: '/owners/ownership', label: 'Ownership' },
+  { href: '/owners/entities', label: 'Owners & entities' },
 ];
 
-export function SettingsTabs() {
+export function OwnersTabs() {
   const pathname = usePathname();
   return (
     <div className="mb-5 flex flex-wrap gap-1 border-b border-line pb-3">

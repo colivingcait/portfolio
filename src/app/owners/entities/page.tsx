@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { prisma } from '@/lib/db';
 import { MODELS } from '@/lib/models';
 import { RecordForm } from '@/components/RecordForm';
-import { DeleteButton } from '@/components/DeleteButton';
+import { RowActions } from '@/components/RowActions';
 import { Badge, Empty, Explainer, PageHeader, Panel, Td, Th } from '@/components/ui';
 
 export const dynamic = 'force-dynamic';
@@ -60,12 +60,7 @@ export default async function EntitiesPage() {
                   <Td right>{entity._count.propertiesHeld}</Td>
                   <Td right>{entity._count.interestsHeld}</Td>
                   <Td>
-                    <div className="flex items-center gap-3">
-                      <Link href={`/settings/entities/${entity.id}`} className="text-[12px] text-muted hover:text-accent">
-                        Edit
-                      </Link>
-                      <DeleteButton modelKey="entity" id={entity.id} />
-                    </div>
+                    <RowActions modelKey="entity" id={entity.id} back="/owners/entities" />
                   </Td>
                 </tr>
               ))}

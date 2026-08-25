@@ -31,8 +31,8 @@ export default async function ImportsPage() {
 
       {options.length === 0 ? (
         <Note tone="bad">
-          No bank accounts yet. Add one per property in{' '}
-          <Link href="/settings/accounts" className="underline">Settings → Accounts</Link> before importing.
+          No bank accounts yet. One account per property is what makes an import need no typing — add one on the
+          house’s own page under <Link href="/properties" className="underline">Properties</Link> before importing.
         </Note>
       ) : (
         <Panel

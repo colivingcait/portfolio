@@ -1,7 +1,10 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getLoanDetail, todayIso } from '@/lib/queries';
+import { getLoanDetail, getSelectOptions, todayIso } from '@/lib/queries';
 import { Badge, Money, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
+import { AddPanel } from '@/components/AddPanel';
+import { RecordForm } from '@/components/RecordForm';
+import { withOptions } from '@/lib/form-helpers';
 import { balanceAtDate, buildSchedule, maturityDateOf, payoffAmount, daysToMaturity } from '@/lib/engine/amortization';
 import { formatCents } from '@/lib/engine/money';
 
@@ -9,7 +12,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function LoanPage({ params }: { params: Promise<{ loanId: string }> }) {
   const { loanId } = await params;
-  const detail = await getLoanDetail(loanId);
+  const [detail, options] = await Promise.all([getLoanDetail(loanId), getSelectOptions()]);
   if (!detail) notFound();
 
   const asOf = todayIso();
@@ -31,9 +34,14 @@ export default async function LoanPage({ params }: { params: Promise<{ loanId: s
           </>
         }
         actions={
-          <Link href="/debt" className="text-[13px] text-muted hover:text-text">
-            ← Ladder
-          </Link>
+          <div className="flex items-center gap-3 text-[13px]">
+            <Link href={`/debt/${loanId}/edit`} className="text-muted hover:text-text">
+              Edit terms
+            </Link>
+            <Link href="/debt" className="text-muted hover:text-text">
+              ← Ladder
+            </Link>
+          </div>
         }
       />
 
@@ -100,6 +108,17 @@ export default async function LoanPage({ params }: { params: Promise<{ loanId: s
           </table>
         </div>
       </Panel>
+
+      <AddPanel
+        label="Record a payment"
+        description="Only where a payment differed from the schedule above — an extra principal payment, a late one, a different amount. Payments that landed as scheduled need no entry, and the ones due this month can be marked paid on Payouts."
+      >
+        <RecordForm
+          modelKey="loanPayment"
+          fields={withOptions('loanPayment', { loanId: options.loans })}
+          initial={{ loanId }}
+        />
+      </AddPanel>
     </>
   );
 }

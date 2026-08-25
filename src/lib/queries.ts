@@ -287,7 +287,8 @@ export async function getPropertyDetail(propertyId: string, month: MonthKey) {
       rooms: { orderBy: { label: 'asc' } },
       managementPeriods: { orderBy: { startDate: 'asc' } },
       leases: { orderBy: { startDate: 'desc' } },
-      bankAccounts: true,
+      bankAccounts: { orderBy: { label: 'asc' } },
+      valuations: { orderBy: { date: 'desc' } },
       loans: { include: { payments: true }, orderBy: { maturityDate: 'asc' } },
     },
   });

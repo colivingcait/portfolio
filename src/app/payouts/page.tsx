@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { OwnersTabs } from '@/components/OwnersTabs';
 import { getPayouts } from '@/lib/payouts-queries';
 import { currentMonth } from '@/lib/queries';
 import { Badge, Empty, Money, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
@@ -35,6 +36,8 @@ export default async function PayoutsPage({
         }
       />
 
+      <OwnersTabs />
+
       <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="Due to lenders" value={formatCents(data.totals.lendersCents)} hint={`${data.due.length} payment${data.due.length === 1 ? '' : 's'} scheduled`} />
         <Stat label="Still unpaid" value={formatCents(data.totals.unpaidLendersCents)} tone={data.totals.unpaidLendersCents > 0 ? 'bad' : 'muted'} hint={`${unpaid.length} outstanding`} />
@@ -49,7 +52,7 @@ export default async function PayoutsPage({
         {data.due.length === 0 ? (
           <Empty>
             Nothing falls due in {month}. Loans are set up in{' '}
-            <Link href="/settings/loans" className="underline">Settings → Loans</Link>, where the payment frequency
+            <Link href="/debt" className="underline">Debt</Link>, where the payment frequency
             decides which months a note appears in.
           </Empty>
         ) : (
@@ -118,7 +121,7 @@ export default async function PayoutsPage({
         <Panel title="Owner distributions">
           <Empty>
             No property has ownership interests recorded yet. Add them in{' '}
-            <Link href="/settings/ownership" className="underline">Settings → Ownership</Link> — the split follows the
+            <Link href="/owners/ownership" className="underline">Owners → Ownership</Link> — the split follows the
             distribution percentage where one is set, and equity otherwise.
           </Empty>
         </Panel>
@@ -212,7 +215,7 @@ export default async function PayoutsPage({
             A gap here means the two records of the same event disagree. Money that left the account without a
             distribution recorded overstates what an investor is still owed back on sale; a distribution recorded
             without a transfer understates it. Either record the missing entry in{' '}
-            <Link href="/settings/capital" className="underline">Settings → Capital</Link>, or fix the category on the
+            <Link href="/owners/capital" className="underline">Owners → Capital</Link>, or fix the category on the
             statement row in <Link href="/review" className="underline">Review</Link>.
           </Note>
         )}
@@ -225,7 +228,7 @@ export default async function PayoutsPage({
         {data.capital.length === 0 ? (
           <Empty>
             Nothing recorded. An investor who put money in without it being a loan belongs here: add a contribution in{' '}
-            <Link href="/settings/capital" className="underline">Settings → Capital</Link>.
+            <Link href="/owners/capital" className="underline">Owners → Capital</Link>.
           </Empty>
         ) : (
           <table>

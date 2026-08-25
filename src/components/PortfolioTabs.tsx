@@ -3,20 +3,12 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
-/**
- * What is left in Settings once the portfolio moved out of it.
- *
- * A loan is not a setting, and neither is a property, an ownership stake or a
- * valuation — those are the subject matter, and they live with their results.
- * These two configure how the machine behaves: you come here when the tool
- * misfiles something, not when the business changes.
- */
 const TABS = [
-  { href: '/settings/rules', label: 'Payee rules' },
-  { href: '/settings/categories', label: 'Categories' },
+  { href: '/', label: 'Overview' },
+  { href: '/properties', label: 'Properties' },
 ];
 
-export function SettingsTabs() {
+export function PortfolioTabs() {
   const pathname = usePathname();
   return (
     <div className="mb-5 flex flex-wrap gap-1 border-b border-line pb-3">

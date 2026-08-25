@@ -136,7 +136,7 @@ export interface QuickEntityResult {
  * Create an entity without leaving the form.
  *
  * A partner usually turns up while the split is being entered, and going to
- * Settings → Entities to add them would discard the rows already typed.
+ * Owners → Entities to add them would discard the rows already typed.
  *
  * An exact name match is reused rather than duplicated: two entities with the
  * same name are indistinguishable in every dropdown afterwards, and a

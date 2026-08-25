@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/db';
 import { getOwnershipContext, getSelectOptions, todayIso } from '@/lib/queries';
-import { DeleteButton } from '@/components/DeleteButton';
+import { RowActions } from '@/components/RowActions';
 import { OwnershipSplitForm } from '@/components/OwnershipSplitForm';
 import { Badge, Empty, Explainer, Note, PageHeader, Panel, Pct, Td, Th } from '@/components/ui';
 import { effectiveShare } from '@/lib/engine/ownership';
@@ -55,7 +55,7 @@ export default async function OwnershipPage() {
       {!context.viewerId ? (
         <Note tone="bad">
           No entity is marked as you, so no effective share can be computed. Set “This is me” on your own entity in{' '}
-          <Link href="/settings/entities" className="underline">Entities</Link>.
+          <Link href="/owners/entities" className="underline">Entities</Link>.
         </Note>
       ) : null}
 
@@ -160,12 +160,7 @@ export default async function OwnershipPage() {
                         <span className="text-[12px] text-muted">{interest.basis}</span>
                       </Td>
                       <Td>
-                        <div className="flex items-center gap-3">
-                          <Link href={`/settings/ownership/${interest.id}`} className="text-[12px] text-muted hover:text-accent">
-                            Edit
-                          </Link>
-                          <DeleteButton modelKey="ownershipInterest" id={interest.id} />
-                        </div>
+                        <RowActions modelKey="ownershipInterest" id={interest.id} back="/owners/ownership" />
                       </Td>
                     </tr>
                   ))}

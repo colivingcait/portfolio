@@ -41,7 +41,7 @@ export default async function ReportsPage({
   return (
     <>
       <PageHeader
-        title="Reports"
+        title="Year end"
         subtitle="Year-end figures in the vocabulary an accountant uses, built from the operational categories you already assign. Nothing here changes how anything is categorized."
         actions={
           <div className="flex items-center gap-1 text-[13px]">
@@ -107,7 +107,7 @@ export default async function ReportsPage({
           Escrow went out inside a mortgage payment with no disbursement split on record, so it is on no line below.
           Paying into escrow is not a deduction — what the servicer paid out for taxes and insurance is. Put the annual
           amounts on the loan in{' '}
-          <Link href="/settings/loans" className="underline">Settings → Loans</Link>, taking them off the servicer's
+          <Link href="/debt" className="underline">Debt</Link>, taking them off the servicer's
           year-end escrow analysis.
           {data.rows
             .filter((r) => r.scheduleE.unallocatedEscrowCents > 0)

@@ -210,7 +210,7 @@ export function OwnershipSplitForm({ entities, properties }: Props) {
           {draftError ? <p className="mt-2 text-[12px] text-bad">{draftError}</p> : null}
           <p className="mt-2 text-[11px] text-muted">
             Added to the entity list and selected here. Anything else it needs — tax ID, notes, or marking it as you —
-            can be filled in later under Settings → Entities.
+            can be filled in later under Owners → Entities.
           </p>
         </div>
       ) : null}

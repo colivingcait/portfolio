@@ -1,10 +1,10 @@
 import Link from 'next/link';
 import { getSelectOptions } from '@/lib/queries';
 import { RecordForm } from '@/components/RecordForm';
-import { DeleteButton } from '@/components/DeleteButton';
+import { RowActions } from '@/components/RowActions';
 import { RepairRulesButton } from '@/components/RepairRulesButton';
 import { Badge, Empty, Explainer, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
-import { withOptions } from '../_shared/helpers';
+import { withOptions } from '@/lib/form-helpers';
 import { getCategoryCatalog } from '@/lib/categories-queries';
 import { getRuleHealth } from '@/lib/rules-queries';
 import { category } from '@/lib/engine/categories';
@@ -123,10 +123,7 @@ export default async function RulesPage() {
                   <Td>
                     <div className="flex items-center gap-3">
                       {rule.repair ? <RepairRulesButton ruleId={rule.id} preview={rule.repair.match} /> : null}
-                      <Link href={`/settings/rules/${rule.id}`} className="text-[12px] text-muted hover:text-accent">
-                        Edit
-                      </Link>
-                      <DeleteButton modelKey="payeeRule" id={rule.id} />
+                      <RowActions modelKey="payeeRule" id={rule.id} back="/settings/rules" />
                     </div>
                   </Td>
                 </tr>

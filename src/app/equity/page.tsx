@@ -1,20 +1,12 @@
 import Link from 'next/link';
+import { OwnersTabs } from '@/components/OwnersTabs';
 import { getEquity } from '@/lib/equity-queries';
 import { todayIso } from '@/lib/queries';
 import { Badge, Empty, Money, Note, PageHeader, Panel, Pct, Td, Th } from '@/components/ui';
 import { formatCents } from '@/lib/engine/money';
+import { SOURCE_LABELS } from '@/lib/engine/equity';
 
 export const dynamic = 'force-dynamic';
-
-const SOURCE_LABELS: Record<string, string> = {
-  appraisal: 'Appraisal',
-  broker_opinion: 'Broker opinion',
-  contract: 'Under contract',
-  sale: 'Sold',
-  purchase: 'Purchase price',
-  avm: 'Automated estimate',
-  owner_estimate: 'Own estimate',
-};
 
 const COST_OPTIONS = [0, 6, 8, 10];
 
@@ -38,6 +30,8 @@ export default async function EquityPage({
         actions={<span className="text-[12px] text-muted">as of {asOf}</span>}
       />
 
+      <OwnersTabs />
+
       <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="Estimated value" value={formatCents(data.totals.valueCents)} hint={`${valued.length} of ${data.rows.length} properties valued`} />
         <Stat label="Debt outstanding" value={formatCents(data.totals.debtBalanceCents)} hint={data.totals.ltvPercent !== null ? `${data.totals.ltvPercent.toFixed(1)}% LTV` : undefined} />
@@ -54,7 +48,7 @@ export default async function EquityPage({
           {data.totals.unvaluedCount} {data.totals.unvaluedCount === 1 ? 'property has' : 'properties have'} no value
           estimate. Their debt is counted in the totals above but their value is not, so equity is understated and LTV
           overstated. Add estimates in{' '}
-          <Link href="/settings/valuations" className="underline">Settings → Valuations</Link>.
+          <Link href="/properties" className="underline">Properties</Link>, on the house&apos;s own page.
         </Note>
       ) : null}
 
@@ -97,7 +91,7 @@ export default async function EquityPage({
                   <Td>
                     {row.valued ? (
                       <>
-                        <span className="text-[12px]">{SOURCE_LABELS[row.valuationSource ?? ''] ?? row.valuationSource}</span>
+                        <span className="text-[12px]">{row.valuationSource ? (SOURCE_LABELS[row.valuationSource] ?? row.valuationSource) : '—'}</span>
                         <div className="mt-0.5 text-[11px] text-muted">
                           <span className="num">{row.valuationDate}</span>
                           {row.stale ? <Badge tone="warn">stale</Badge> : null}

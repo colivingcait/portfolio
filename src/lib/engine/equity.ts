@@ -28,6 +28,17 @@ export interface Valuation {
   source: ValuationSource;
 }
 
+/** How a source reads on screen. Defined once so two screens cannot disagree. */
+export const SOURCE_LABELS: Record<ValuationSource, string> = {
+  appraisal: 'Appraisal',
+  broker_opinion: 'Broker opinion',
+  contract: 'Under contract',
+  sale: 'Sold',
+  purchase: 'Purchase price',
+  avm: 'Automated estimate',
+  owner_estimate: 'Own estimate',
+};
+
 /** How much weight a source deserves, for the interface to say so plainly. */
 export const SOURCE_CONFIDENCE: Record<ValuationSource, 'high' | 'medium' | 'low'> = {
   sale: 'high',
