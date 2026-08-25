@@ -30,33 +30,54 @@ import type {
 
 export type PadSplitFileKind = 'summary' | 'billed' | 'collected' | 'earnings_table';
 
-const PROPERTY_ID = ['property id', 'psid'];
-const ROOM_ID = ['room id'];
-const ROOM_NUMBER = ['room number'];
-const MEMBER_ID = ['member id'];
-const MEMBER_FIRST = ['member first name'];
-const MEMBER_LAST = ['member last name'];
-const EARNINGS_MONTH = ['earnings month'];
-const PAYOUT_MONTH = ['payout month'];
-const CREATED = ['created'];
-const BILL_ID = ['bill id'];
-const BILL_TYPE = ['bill type'];
-const GROSS_COLLECTED = ['gross collected'];
-const BOOKING_FEES = ['booking fees amount', 'booking fee amount'];
-const NET_OF_BOOKING = ['collections net of booking fees'];
-const SERVICE_FEES = ['service fees'];
-const HOST_EARNINGS = ['host earnings'];
-const ADJUSTMENTS = ['adjustments'];
-const TOTAL_PAYOUT = ['total payout'];
+/**
+ * Header aliases, not exact names.
+ *
+ * The one export seen so far says "Booking Fees Amount"; a prior build of this
+ * had already met "Booking Fee Amount", "Booking Fee" and "Booking Fees" in
+ * the wild. A parser matching one exact string would keep working right up
+ * until the day PadSplit changed a heading, and would then read that column as
+ * absent — a zero, silently, in the middle of the money. Every alias below is
+ * one somebody has actually been handed.
+ *
+ * Matching is case-insensitive and trimmed, exact before partial, so a longer
+ * heading never steals a shorter one's column.
+ */
+const PROPERTY_ID = ['property id', 'psid', 'propertyid'];
+const ROOM_ID = ['room id', 'roomid'];
+const ROOM_NUMBER = ['room number', 'room #', 'room'];
+const MEMBER_ID = ['member id', 'memberid'];
+const MEMBER_FIRST = ['member first name', 'first name'];
+const MEMBER_LAST = ['member last name', 'last name'];
+const EARNINGS_MONTH = ['earnings month', 'earning month'];
+const PAYOUT_MONTH = ['payout month', 'payoutmonth'];
+const CREATED = ['created', 'created date', 'created at', 'bill date', 'payout date'];
+const BILL_ID = ['bill id', 'billid'];
+const BILL_TYPE = ['bill type', 'billtype'];
+const GROSS_COLLECTED = ['gross collected', 'gross collections', 'gross'];
+const BOOKING_FEES = ['booking fees amount', 'booking fee amount', 'booking fees', 'booking fee'];
+const NET_OF_BOOKING = ['collections net of booking fees', 'net of booking fees'];
+const SERVICE_FEES = ['service fees amount', 'service fee amount', 'service fees', 'service fee'];
+/**
+ * Not present in the export seen so far, and read anyway.
+ *
+ * A prior build met it as a separate column. If PadSplit starts charging one
+ * and it is not read, it disappears from the fee total rather than showing up
+ * as an unrecognised heading, and the bottom line quietly overstates.
+ */
+const TRANSACTION_FEES = ['txn fees', 'txn fee', 'transaction fees amount', 'transaction fee amount', 'transaction fees', 'transaction fee'];
+const HOST_EARNINGS = ['host earnings', 'host earning'];
+const ADJUSTMENTS = ['adjustments', 'adjustment'];
+const TOTAL_PAYOUT = ['total payout', 'payout'];
 const PAYOUT_ACCOUNT = ['payout account'];
-const ADDRESS = ['address', 'street 1'];
+const ADDRESS = ['property address', 'address', 'street 1'];
 const AMOUNT = ['amount'];
-const TRANSACTION_TYPE = ['transaction type'];
-const TRANSACTION_REASON = ['transaction reason'];
+const TRANSACTION_TYPE = ['transaction type', 'txn type'];
+const TRANSACTION_REASON = ['transaction reason', 'reason'];
 const CATEGORY = ['category'];
 const ROW_TYPE = ['row_type', 'row type'];
 const MONTH = ['month'];
-const IN_FLIGHT = ['is_in_flight', 'is in flight'];
+const IN_FLIGHT = ['is_in_flight', 'is in flight', 'in_flight'];
 const TOTAL_COLLECTIONS = ['total_collections', 'total collections'];
 const TOTAL_EXPENSES = ['total_expenses', 'total expenses'];
 const TOTAL_ADJUSTMENTS = ['total_adjustments', 'total adjustments'];
@@ -183,8 +204,8 @@ export function parsePadSplitFile(text: string): ParsedPadSplitFile {
     summary: {
       earningsMonth: EARNINGS_MONTH, payoutMonth: PAYOUT_MONTH, propertyExternalId: PROPERTY_ID,
       address: ADDRESS, gross: GROSS_COLLECTED, bookingFees: BOOKING_FEES, netOfBooking: NET_OF_BOOKING,
-      serviceFees: SERVICE_FEES, hostEarnings: HOST_EARNINGS, adjustments: ADJUSTMENTS,
-      totalPayout: TOTAL_PAYOUT, payoutAccount: PAYOUT_ACCOUNT,
+      serviceFees: SERVICE_FEES, transactionFees: TRANSACTION_FEES, hostEarnings: HOST_EARNINGS,
+      adjustments: ADJUSTMENTS, totalPayout: TOTAL_PAYOUT, payoutAccount: PAYOUT_ACCOUNT,
     },
     billed: {
       billId: BILL_ID, created: CREATED, propertyExternalId: PROPERTY_ID, roomExternalId: ROOM_ID,
@@ -195,7 +216,8 @@ export function parsePadSplitFile(text: string): ParsedPadSplitFile {
       created: CREATED, payoutMonth: PAYOUT_MONTH, propertyExternalId: PROPERTY_ID, roomExternalId: ROOM_ID,
       roomNumber: ROOM_NUMBER, memberId: MEMBER_ID, memberFirst: MEMBER_FIRST, memberLast: MEMBER_LAST,
       billId: BILL_ID, billType: BILL_TYPE, gross: GROSS_COLLECTED, bookingFee: BOOKING_FEES,
-      serviceFees: SERVICE_FEES, hostEarnings: HOST_EARNINGS, category: CATEGORY,
+      serviceFees: SERVICE_FEES, transactionFees: TRANSACTION_FEES, hostEarnings: HOST_EARNINGS,
+      category: CATEGORY,
     },
     earnings_table: {
       rowType: ROW_TYPE, month: MONTH, inFlight: IN_FLIGHT, collections: TOTAL_COLLECTIONS,
@@ -247,7 +269,9 @@ export function parsePadSplitFile(text: string): ParsedPadSplitFile {
         grossCents: money(row, 'gross'),
         bookingFeesCents: money(row, 'bookingFees'),
         netOfBookingFeesCents: money(row, 'netOfBooking'),
-        serviceFeesCents: money(row, 'serviceFees'),
+        // Folded in with the service fee: it is the platform's cut either way,
+        // and keeping it separate would mean every total had to remember it.
+        serviceFeesCents: money(row, 'serviceFees') + money(row, 'transactionFees'),
         hostEarningsCents: money(row, 'hostEarnings'),
         adjustmentsCents: money(row, 'adjustments'),
         totalPayoutCents: money(row, 'totalPayout'),
@@ -332,7 +356,7 @@ export function parsePadSplitFile(text: string): ParsedPadSplitFile {
       category: collectionCategoryOf(cell(row, 'category')),
       amountCents: amount,
       bookingFeeCents: money(row, 'bookingFee'),
-      serviceFeeCents: money(row, 'serviceFees'),
+      serviceFeeCents: money(row, 'serviceFees') + money(row, 'transactionFees'),
       hostEarningsCents: money(row, 'hostEarnings'),
       payoutMonthRaw,
       createdDate,

@@ -191,3 +191,59 @@ describe('the parts that never depended on a column name', () => {
     expect(collectionCategoryOf('collected')).toBe('collected');
   });
 });
+
+describe('headings that move between exports', () => {
+  // Every variant here is one a prior build was actually handed. Matching an
+  // exact string would read the column as absent and post a silent zero in the
+  // middle of the money.
+  const VARIANTS = ['Booking Fees Amount', 'Booking Fee Amount', 'Booking Fees', 'Booking Fee'];
+
+  it.each(VARIANTS)('reads %s as the booking fee', (heading) => {
+    const text = [
+      `Earnings Month,Payout Month,PSID,Address,Gross Collected,${heading},Collections Net of Booking Fees,Service Fees,Host Earnings,Adjustments,Total Payout`,
+      '2026-01,2026-02,8299,1939 Candace Lane,5578.45,-470.01,5108.44,-408.68,4699.76,0.00,4699.76',
+    ].join('\n');
+    expect(parsePadSplitFile(text).summary[0].bookingFeesCents).toBe(-47_001);
+  });
+
+  it.each(['Service Fees', 'Service Fee', 'Service Fee Amount', 'Service Fees Amount'])(
+    'reads %s as the service fee',
+    (heading) => {
+      const text = [
+        `Earnings Month,Payout Month,PSID,Gross Collected,Booking Fees Amount,Collections Net of Booking Fees,${heading},Host Earnings,Adjustments,Total Payout`,
+        '2026-01,2026-02,8299,5578.45,-470.01,5108.44,-408.68,4699.76,0.00,4699.76',
+      ].join('\n');
+      expect(parsePadSplitFile(text).summary[0].serviceFeesCents).toBe(-40_868);
+    },
+  );
+
+  it('folds a transaction fee into the platform cut instead of dropping it', () => {
+    // Absent from the export seen so far. Read anyway: an unread fee column
+    // does not show up as an unrecognised heading, it just quietly overstates
+    // what the house made.
+    const text = [
+      'Earnings Month,Payout Month,PSID,Gross Collected,Booking Fees Amount,Collections Net of Booking Fees,Service Fees,Txn Fees,Host Earnings,Adjustments,Total Payout',
+      '2026-01,2026-02,8299,1000.00,0.00,1000.00,-80.00,-5.00,915.00,0.00,915.00',
+    ].join('\n');
+    const [row] = parsePadSplitFile(text).summary;
+    expect(row.serviceFeesCents).toBe(-8_500);
+    expect(row.grossCents + row.bookingFeesCents + row.serviceFeesCents).toBe(row.hostEarningsCents);
+  });
+
+  it('still recognises PSID under its other name', () => {
+    const text = [
+      'Earnings Month,Payout Month,Property ID,Gross Collected,Booking Fees Amount,Collections Net of Booking Fees,Service Fees,Host Earnings,Adjustments,Total Payout',
+      '2026-01,2026-02,8299,100.00,0.00,100.00,-8.00,92.00,0.00,92.00',
+    ].join('\n');
+    expect(parsePadSplitFile(text).summary[0].propertyExternalId).toBe('8299');
+  });
+
+  it('does not let a longer heading steal a shorter one’s column', () => {
+    // "Service Fee Rate" must not be read as the service fee.
+    const text = [
+      'Earnings Month,Payout Month,PSID,Gross Collected,Booking Fees Amount,Collections Net of Booking Fees,Service Fee Rate,Service Fees,Host Earnings,Adjustments,Total Payout',
+      '2026-01,2026-02,8299,1000.00,0.00,1000.00,8.00,-80.00,920.00,0.00,920.00',
+    ].join('\n');
+    expect(parsePadSplitFile(text).summary[0].serviceFeesCents).toBe(-8_000);
+  });
+});

@@ -28,6 +28,27 @@
   --color-warn: #8a5a00;
   --color-bad: #c0271c;
 
+  /*
+   * Chart series. A fixed order, never cycled: colour follows the property, so
+   * filtering one out never repaints the others. Validated against this white
+   * surface — worst adjacent CVD ΔE 9.1, normal-vision 22.9. Aqua and yellow
+   * sit under 3:1 on white, so every chart using them carries visible labels
+   * or sits beside the table it describes; hue never carries meaning alone.
+   */
+  --color-series-1: #2a78d6;
+  --color-series-2: #eb6834;
+  --color-series-3: #1baf7a;
+  --color-series-4: #eda100;
+
+  /* Sequential, one hue light→dark, for ageing and magnitude. */
+  --color-ramp-1: #9ec5f4;
+  --color-ramp-2: #5598e7;
+  --color-ramp-3: #2a78d6;
+  --color-ramp-4: #184f95;
+
+  /* Recessive chrome. A gridline should never compete with a mark. */
+  --color-grid: #e1e4e9;
+
   --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
 }
 

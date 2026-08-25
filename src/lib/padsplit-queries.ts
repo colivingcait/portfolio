@@ -17,10 +17,24 @@ export interface OperationsRow extends PropertyMonth {
   /** Straight off summary.csv, which is authoritative for the money. */
   bookingFeesCents: number;
   serviceFeesCents: number;
+  /** Distinct people who paid in the month. More than rooms means turnover. */
   membersActive: number;
+  /** People beyond one per occupied room — rooms that changed hands. */
+  turnovers: number;
   /** Charges raised this month, and what has since been collected against them. */
   cohortChargedCents: number;
   cohortCollectedCents: number;
+}
+
+export interface RoomHistory {
+  propertyId: string;
+  propertyName: string;
+  roomNumber: string;
+  /** Host earnings per month, null where the room earned nothing at all. */
+  byMonth: (number | null)[];
+  medianCents: number | null;
+  /** Distinct people in the room across every month imported. */
+  people: number;
 }
 
 export interface AgeingBucket {
@@ -34,6 +48,8 @@ export interface MemberBalance {
   propertyName: string;
   roomNumber: string | null;
   outstandingCents: number;
+  /** No charge in the latest month. Money from them rarely arrives. */
+  movedOut: boolean;
 }
 
 export interface OperationsData {
@@ -46,8 +62,11 @@ export interface OperationsData {
   trueRoomRates: { propertyId: string; propertyName: string; rateCents: number | null; monthsUsed: number }[];
   ageing: AgeingBucket[];
   outstandingTotalCents: number;
-  outstandingByReason: { reason: string; amountCents: number }[];
   memberBalances: MemberBalance[];
+  rooms: RoomHistory[];
+  /** Members with no charge in the latest month — money from them rarely arrives. */
+  movedOutOwedCents: number;
+  currentOwedCents: number;
   daysToCollect: { median: number; p90: number; count: number } | null;
   hasData: boolean;
 }
@@ -129,6 +148,13 @@ export async function getOperations(monthParam?: string): Promise<OperationsData
       bookingFeesCents: s.bookingFeesCents,
       serviceFeesCents: s.serviceFeesCents,
       membersActive: new Set(c.map((x) => x.memberId).filter(Boolean)).size,
+      // A room with two payers in a month changed hands once. Counting people
+      // and calling it occupancy read as eleven members in eight rooms, which
+      // looked like a bug and was actually the most useful number on the page.
+      turnovers: [...new Set(c.map((x) => x.roomExternalId).filter(Boolean))].reduce((count, room) => {
+        const people = new Set(c.filter((x) => x.roomExternalId === room).map((x) => x.memberId).filter(Boolean));
+        return count + Math.max(0, people.size - 1);
+      }, 0),
       cohortChargedCents: -charges.reduce((sum, x) => sum + x.amountCents, 0),
       cohortCollectedCents: charges.reduce((sum, x) => sum + (paidByBill.get(x.billId) ?? 0), 0),
     };
@@ -164,7 +190,6 @@ export async function getOperations(monthParam?: string): Promise<OperationsData
   }
   const ledger = new Map<string, Map<string, Ledger>>(); // member -> month -> ledger
   const memberMeta = new Map<string, { name: string; propertyName: string; roomNumber: string | null }>();
-  const reasonNet = new Map<string, number>();
 
   const entry = (memberId: string, month: string): Ledger => {
     const months = ledger.get(memberId) ?? new Map<string, Ledger>();
@@ -187,7 +212,6 @@ export async function getOperations(monthParam?: string): Promise<OperationsData
         roomNumber: bill.roomNumber,
       });
     }
-    reasonNet.set(bill.reason, (reasonNet.get(bill.reason) ?? 0) + -bill.amountCents);
   }
 
   // Ageing is oldest-first: money paid settles the oldest debt before the
@@ -231,13 +255,55 @@ export async function getOperations(monthParam?: string): Promise<OperationsData
         propertyName: meta.propertyName,
         roomNumber: meta.roomNumber,
         outstandingCents: balance,
+        movedOut: false,
       });
     }
   }
 
-  const byReason = new Map(
-    [...reasonNet.entries()].filter(([, amount]) => amount > 0),
-  );
+  // Per room, which is the level the question is actually asked at. A median
+  // across a whole house told you nothing you could act on; a room earning
+  // $200 a month less than its neighbour and turning over seven times in eight
+  // months is a specific thing to go and look at.
+  const roomKey = (line: (typeof collected)[number]) => `${line.propertyExternalId}|${line.roomNumber}`;
+  const roomTotals = new Map<string, Map<string, number>>();
+  const roomPeople = new Map<string, Set<string>>();
+  for (const line of collected) {
+    if (!line.roomNumber || !line.propertyExternalId || line.category !== 'collected') continue;
+    const key = roomKey(line);
+    const byMonth = roomTotals.get(key) ?? new Map<string, number>();
+    byMonth.set(line.earningsMonth, (byMonth.get(line.earningsMonth) ?? 0) + line.hostEarningsCents);
+    roomTotals.set(key, byMonth);
+    const people = roomPeople.get(key) ?? new Set<string>();
+    if (line.memberId) people.add(line.memberId);
+    roomPeople.set(key, people);
+  }
+
+  const rooms: RoomHistory[] = [...roomTotals.entries()]
+    .map(([key, byMonth]) => {
+      const [psid, roomNumber] = key.split('|');
+      const property = byPsid.get(psid);
+      const values = months.map((m) => (byMonth.has(m) ? byMonth.get(m)! : null));
+      const earned = values.filter((v): v is number => v !== null && v > 0).sort((a, b) => a - b);
+      return {
+        propertyId: property?.id ?? psid,
+        propertyName: property?.name ?? psid,
+        roomNumber,
+        byMonth: values,
+        medianCents: earned.length ? earned[Math.floor(earned.length / 2)] : null,
+        people: roomPeople.get(key)?.size ?? 0,
+      };
+    })
+    .sort((a, b) => a.propertyName.localeCompare(b.propertyName) || Number(a.roomNumber) - Number(b.roomNumber));
+
+  // Money owed by someone who has left is a write-off in all but name: people
+  // almost never pay after they move out. Splitting it out is the difference
+  // between a receivable and a number that only looks like one.
+  const latest = months[months.length - 1];
+  const stillHere = new Set(billed.filter((b) => b.earningsMonth === latest && b.memberId).map((b) => b.memberId as string));
+  const balances = [...byMember.values()];
+  const currentOwedCents = balances.filter((m) => stillHere.has(m.memberId)).reduce((sum, m) => sum + m.outstandingCents, 0);
+  const movedOutOwedCents = balances.filter((m) => !stillHere.has(m.memberId)).reduce((sum, m) => sum + m.outstandingCents, 0);
+  for (const balance of balances) balance.movedOut = !stillHere.has(balance.memberId);
 
   // How long cash actually takes to arrive after a charge is raised.
   const billDate = new Map(billed.map((b) => [b.billId, requireIsoDate(b.billedDate)]));
@@ -262,11 +328,10 @@ export async function getOperations(monthParam?: string): Promise<OperationsData
       amountCents: ageing.get(label) ?? 0,
     })),
     outstandingTotalCents: [...ageing.values()].reduce((sum, value) => sum + value, 0),
-    outstandingByReason: [...byReason.entries()]
-      .map(([reason, amountCents]) => ({ reason, amountCents }))
-      .sort((a, b) => b.amountCents - a.amountCents)
-      .slice(0, 8),
-    memberBalances: [...byMember.values()].sort((a, b) => b.outstandingCents - a.outstandingCents).slice(0, 12),
+    memberBalances: balances.sort((a, b) => b.outstandingCents - a.outstandingCents).slice(0, 10),
+    rooms,
+    currentOwedCents,
+    movedOutOwedCents,
     daysToCollect: lags.length
       ? { median: lags[Math.floor(lags.length / 2)], p90: lags[Math.floor(lags.length * 0.9)], count: lags.length }
       : null,

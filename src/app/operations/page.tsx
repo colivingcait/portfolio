@@ -3,6 +3,7 @@ import { getOperations } from '@/lib/padsplit-queries';
 import { PortfolioTabs } from '@/components/PortfolioTabs';
 import { Badge, Empty, Explainer, Money, Note, PageHeader, Panel, Pct, Td, Th } from '@/components/ui';
 import { formatCents } from '@/lib/engine/money';
+import { Legend, LineChart, RAMP, Sparkline, StackedBar, seriesColor } from '@/components/charts';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,6 +35,20 @@ export default async function OperationsPage({
   const roomsTotal = sum((r) => r.roomsTotal);
   const netBilled = sum((r) => r.netBilledCents);
   const gross = sum((r) => r.grossCollectedCents);
+
+  // Colour follows the house, fixed across every chart, so filtering one out
+  // never repaints the others.
+  const houseNames = [...new Set(data.history.map((row) => row.propertyName))].sort();
+  const houseSeries = houseNames.map((name, index) => {
+    const own = data.history.filter((row) => row.propertyName === name);
+    const at = (month: string) => own.find((row) => row.earningsMonth === month) ?? null;
+    return {
+      label: name,
+      color: seriesColor(index),
+      occupancy: data.months.map((month) => ({ label: month, value: at(month)?.metrics.occupancyRate ?? null })),
+      collection: data.months.map((month) => ({ label: month, value: at(month)?.metrics.collectionRate ?? null })),
+    };
+  });
 
   return (
     <>
@@ -99,7 +114,7 @@ export default async function OperationsPage({
                 <Th>Property</Th>
                 <Th right>Rooms</Th>
                 <Th right>Occupancy</Th>
-                <Th right>Members</Th>
+                <Th right>Turnover</Th>
                 <Th right>Billed</Th>
                 <Th right>Collected</Th>
                 <Th right>Delinquency</Th>
@@ -126,7 +141,15 @@ export default async function OperationsPage({
                     <span className="num">{row.roomsOccupied}/{row.roomsTotal}</span>
                   </Td>
                   <Td right><Pct value={row.metrics.occupancyRate} digits={0} /></Td>
-                  <Td right><span className="num">{row.membersActive}</span></Td>
+                  <Td right>
+                    {row.turnovers === 0 ? (
+                      <span className="num text-muted">—</span>
+                    ) : (
+                      <span className={row.turnovers > 2 ? 'num text-bad' : 'num'} title={`${row.membersActive} people paid across ${row.roomsOccupied} rooms`}>
+                        {row.turnovers}
+                      </span>
+                    )}
+                  </Td>
                   <Td right><Money cents={row.netBilledCents} muted /></Td>
                   <Td right><Money cents={row.grossCollectedCents} /></Td>
                   <Td right>
@@ -159,46 +182,60 @@ export default async function OperationsPage({
       </Panel>
 
       <Panel
-        title="What a room earns"
-        description="The median of host earnings per occupied room, across months where the house was running normally. Median rather than mean, so one catch-up month does not move it."
+        title="What each room earns"
+        description="Host earnings per room per month. A house-wide median hid the thing worth seeing: rooms in the same house differ by hundreds a month, and the ones that turn over most are the ones that earn least."
       >
-        <table>
-          <thead>
-            <tr>
-              <Th>Property</Th>
-              <Th right>True room rate</Th>
-              <Th right>Months used</Th>
-              <Th>Per month</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.trueRoomRates.map((rate) => {
-              const own = data.history.filter((row) => row.propertyId === rate.propertyId);
-              return (
-                <tr key={rate.propertyId}>
-                  <Td>{rate.propertyName}</Td>
-                  <Td right>{rate.rateCents === null ? <span className="num text-muted">—</span> : <Money cents={rate.rateCents} />}</Td>
-                  <Td right><span className="num">{rate.monthsUsed}</span></Td>
-                  <Td>
-                    <div className="flex flex-wrap gap-1">
-                      {own.map((row) => (
-                        <span
-                          key={row.earningsMonth}
-                          title={`${row.earningsMonth} · ${formatCents(row.metrics.hostEarningsPerOccupiedRoomCents ?? 0)} per room`}
-                          className={`num rounded px-1 py-0.5 text-[10px] ${
-                            row.inFlight ? 'bg-surface-2 text-muted' : row.metrics.outlier ? 'bg-warn/10 text-warn' : 'bg-surface-2'
-                          }`}
-                        >
-                          {formatCents(row.metrics.hostEarningsPerOccupiedRoomCents ?? 0).replace('$', '')}
-                        </span>
-                      ))}
-                    </div>
-                  </Td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table>
+            <thead>
+              <tr>
+                <Th>Room</Th>
+                <Th>Over {data.months.length} months</Th>
+                <Th right>Median</Th>
+                <Th right>People</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.rooms.map((room, index) => {
+                const previous = data.rooms[index - 1];
+                const newHouse = !previous || previous.propertyName !== room.propertyName;
+                const colour = seriesColor(
+                  [...new Set(data.rooms.map((r) => r.propertyName))].indexOf(room.propertyName),
+                );
+                return (
+                  <tr key={`${room.propertyId}-${room.roomNumber}`} className={newHouse ? 'border-t border-line' : ''}>
+                    <Td>
+                      {newHouse ? (
+                        <div className="mb-0.5 text-[11px] font-medium text-muted">{room.propertyName}</div>
+                      ) : null}
+                      <span className="pl-1">Room {room.roomNumber}</span>
+                    </Td>
+                    <Td>
+                      <Sparkline
+                        points={room.byMonth.map((value, i) => ({ label: data.months[i], value }))}
+                        color={colour}
+                        width={320}
+                        height={34}
+                        format={(v) => formatCents(v)}
+                      />
+                    </Td>
+                    <Td right>
+                      {room.medianCents === null ? <span className="num text-muted">—</span> : <Money cents={room.medianCents} />}
+                    </Td>
+                    <Td right>
+                      <span
+                        className={room.people >= 5 ? 'num text-bad' : room.people >= 3 ? 'num text-warn' : 'num text-muted'}
+                        title={`${room.people} different people in this room across ${data.months.length} months`}
+                      >
+                        {room.people}
+                      </span>
+                    </Td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </Panel>
 
       <div className="grid gap-5 lg:grid-cols-2">
@@ -206,22 +243,19 @@ export default async function OperationsPage({
           title="What is still owed"
           description="Charges raised and never collected, aged by the month they were raised. Concessions are money given back and are not in here."
         >
-          <table>
-            <thead>
-              <tr>
-                <Th>Age</Th>
-                <Th right>Outstanding</Th>
-                <Th right>Share</Th>
-              </tr>
-            </thead>
+          <StackedBar
+            segments={data.ageing.map((bucket, i) => ({ label: bucket.label, value: bucket.amountCents, color: RAMP[i] }))}
+          />
+          <table className="mt-3">
             <tbody>
-              {data.ageing.map((bucket) => (
+              {data.ageing.map((bucket, i) => (
                 <tr key={bucket.label}>
-                  <Td>{bucket.label}</Td>
+                  <Td>
+                    <span className="mr-2 inline-block h-2 w-2 rounded-[2px] align-middle" style={{ background: RAMP[i] }} />
+                    {bucket.label}
+                  </Td>
                   <Td right>
-                    <span className={bucket.label === 'Over 90 days' && bucket.amountCents > 0 ? 'text-bad' : ''}>
-                      <Money cents={bucket.amountCents} />
-                    </span>
+                    <Money cents={bucket.amountCents} />
                   </Td>
                   <Td right>
                     <Pct value={data.outstandingTotalCents ? (bucket.amountCents / data.outstandingTotalCents) * 100 : null} digits={0} />
@@ -235,13 +269,18 @@ export default async function OperationsPage({
               </tr>
             </tbody>
           </table>
-          {data.daysToCollect ? (
-            <p className="mt-3 text-[11px] leading-relaxed text-muted">
-              When cash does arrive it arrives quickly: a median of {data.daysToCollect.median} days after the charge
-              is raised, {data.daysToCollect.p90} days at the ninetieth percentile, across{' '}
-              {data.daysToCollect.count} collections. Anything past thirty days is stuck rather than slow.
-            </p>
-          ) : null}
+
+          <p className="mt-3 text-[11px] leading-relaxed text-muted">
+            <Money cents={data.movedOutOwedCents} /> of that is owed by people who have already left — money that
+            almost never arrives, and is better read as a write-off than a receivable. Only{' '}
+            <Money cents={data.currentOwedCents} /> is owed by someone still in a room.
+            {data.daysToCollect ? (
+              <>
+                {' '}When cash does come it comes fast: a median of {data.daysToCollect.median} days after the charge,
+                {' '}{data.daysToCollect.p90} at the ninetieth percentile. Past thirty days it is stuck, not slow.
+              </>
+            ) : null}
+          </p>
         </Panel>
 
         <Panel title="Who owes it" description="Outstanding by member, across every month.">
@@ -262,6 +301,7 @@ export default async function OperationsPage({
                     <Td>
                       {member.memberName}
                       {member.roomNumber ? <span className="ml-1.5 text-[11px] text-muted">room {member.roomNumber}</span> : null}
+                      {member.movedOut ? <Badge tone="muted">moved out</Badge> : null}
                     </Td>
                     <Td>
                       <span className="text-[12px] text-muted">{member.propertyName}</span>
@@ -275,70 +315,31 @@ export default async function OperationsPage({
         </Panel>
       </div>
 
-      <Panel title="What the arrears are for" description="Outstanding by the reason the charge was raised.">
-        <table>
-          <thead>
-            <tr>
-              <Th>Reason</Th>
-              <Th right>Outstanding</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.outstandingByReason.map((row) => (
-              <tr key={row.reason}>
-                <Td>{row.reason.replace(/_/g, ' ')}</Td>
-                <Td right><Money cents={row.amountCents} /></Td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <Panel
+        title="Occupancy over time"
+        description="Each house across every month imported. One axis, so the lines are directly comparable."
+      >
+        <Legend series={houseSeries.map((s) => ({ label: s.label, color: s.color }))} />
+        <LineChart
+          series={houseSeries.map((s) => ({ ...s, points: s.occupancy }))}
+          labels={data.months}
+          suffix="%"
+          format={(v) => v.toFixed(0)}
+        />
       </Panel>
 
-      <Panel title="Every month" description="Each property across every month imported. In-flight and ramp-up months are marked.">
-        <div className="overflow-x-auto">
-          <table>
-            <thead>
-              <tr>
-                <Th>Property</Th>
-                <Th>Month</Th>
-                <Th right>Occupancy</Th>
-                <Th right>Collection</Th>
-                <Th right>Delinquency</Th>
-                <Th right>Host earnings</Th>
-                <Th right>Per room</Th>
-                <Th right>Cohort recovered</Th>
-                <Th />
-              </tr>
-            </thead>
-            <tbody>
-              {data.history.map((row) => (
-                <tr key={`${row.propertyId}-${row.earningsMonth}`} className="hover:bg-surface-2/50">
-                  <Td>{row.propertyName}</Td>
-                  <Td><span className="num">{row.earningsMonth}</span></Td>
-                  <Td right><Pct value={row.metrics.occupancyRate} digits={0} /></Td>
-                  <Td right>{row.inFlight ? <span className="num text-muted">—</span> : <Pct value={row.metrics.collectionRate} digits={0} />}</Td>
-                  <Td right>
-                    {row.inFlight ? (
-                      <span className="num text-muted">—</span>
-                    ) : row.metrics.delinquencyCents > 0 ? (
-                      <Money cents={row.metrics.delinquencyCents} />
-                    ) : (
-                      <span className="num text-muted">caught up</span>
-                    )}
-                  </Td>
-                  <Td right><Money cents={row.hostEarningsCents} /></Td>
-                  <Td right><Money cents={row.metrics.hostEarningsPerOccupiedRoomCents ?? 0} muted /></Td>
-                  <Td right>
-                    <Pct value={row.cohortChargedCents ? (row.cohortCollectedCents / row.cohortChargedCents) * 100 : null} digits={0} />
-                  </Td>
-                  <Td>
-                    {row.inFlight ? <Badge>in flight</Badge> : row.metrics.outlier ? <Badge tone="warn">ramping</Badge> : null}
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <Panel
+        title="Collection rate over time"
+        description="Cash in against what was billed that month. Above 100% is a house catching up on arrears, not an error. Months still collecting are left out rather than shown low."
+      >
+        <Legend series={houseSeries.map((s) => ({ label: s.label, color: s.color }))} />
+        <LineChart
+          series={houseSeries.map((s) => ({ ...s, points: s.collection }))}
+          labels={data.months}
+          suffix="%"
+          format={(v) => v.toFixed(0)}
+          zeroBased={false}
+        />
       </Panel>
 
       <Note tone="muted">
