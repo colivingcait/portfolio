@@ -66,7 +66,11 @@ export interface MemberBalance {
 }
 
 export interface OperationsData {
+  /** Every month there is data for, whatever the period. */
   months: MonthKey[];
+  /** The months the figures cover. */
+  selectedMonths: MonthKey[];
+  /** The last of them. */
   month: MonthKey;
   inFlight: boolean;
   rows: OperationsRow[];
@@ -92,7 +96,18 @@ export interface OperationsData {
  * the month the money happened to arrive would make it meaningless. The two
  * keys answer different questions and both are kept.
  */
-export async function getOperations(monthParam?: string): Promise<OperationsData> {
+/**
+ * The operating picture over a stretch of earnings months.
+ *
+ * `rows` is one entry per property for the whole period, not per month:
+ * room-days and money add up, and the figures that cannot be added — how many
+ * different people lived there, how full it was — are recomputed from the
+ * lines rather than averaged out of the monthly ones.
+ */
+export async function getOperations(
+  selected?: readonly string[],
+  propertyId?: string | null,
+): Promise<OperationsData> {
   const [summaries, collected, billed, totals, properties] = await Promise.all([
     prisma.summaryLine.findMany({ orderBy: [{ earningsMonth: 'asc' }] }),
     prisma.collectionLine.findMany(),
@@ -103,7 +118,8 @@ export async function getOperations(monthParam?: string): Promise<OperationsData
 
   const byPsid = new Map(properties.filter((p) => p.externalId).map((p) => [p.externalId as string, p]));
   const months = [...new Set(summaries.map((s) => s.earningsMonth))].sort();
-  const month = monthParam && months.includes(monthParam) ? monthParam : (months[months.length - 1] ?? '');
+  const inPeriod = selected && selected.length > 0 ? [...selected].sort() : months.slice(-1);
+  const month = inPeriod[inPeriod.length - 1] ?? '';
   const inFlightMonths = new Set(totals.filter((t) => t.inFlight).map((t) => t.earningsMonth));
 
   // Which month of this property's own run each one is, for the ramp rule.
@@ -212,8 +228,63 @@ export async function getOperations(monthParam?: string): Promise<OperationsData
     };
   };
 
-  const history = summaries.map(build).filter((row): row is OperationsRow => row !== null);
-  const rows = history.filter((row) => row.earningsMonth === month);
+  const all = summaries.map(build).filter((row): row is OperationsRow => row !== null);
+  const history = propertyId ? all.filter((row) => row.propertyId === propertyId) : all;
+
+  // One row per property for the whole period. Room-days and money add; the
+  // count of people who lived there is recomputed, because a resident present
+  // in three months of a quarter is one person, not three.
+  const selectedRows = history.filter((row) => inPeriod.includes(row.earningsMonth));
+  const rows = [...new Set(selectedRows.map((row) => row.propertyId))].map((id) => {
+    const own = selectedRows.filter((row) => row.propertyId === id).sort((a, b) => a.earningsMonth.localeCompare(b.earningsMonth));
+    const last = own[own.length - 1];
+    const sum = (pick: (row: OperationsRow) => number) => own.reduce((total, row) => total + pick(row), 0);
+
+    const psid = last.propertyExternalId;
+    const periodBilled = (billedByProperty.get(psid) ?? []).filter((line) => inPeriod.includes(line.earningsMonth));
+    // A month still collecting lends nothing to a collection rate, in either half.
+    const settled = own.filter((row) => !row.inFlight);
+    const billedSettled = settled.reduce((total, row) => total + row.netBilledCents, 0);
+    const collectedSettled = settled.reduce((total, row) => total + row.grossCollectedCents, 0);
+
+    const pm: PropertyMonth = {
+      propertyExternalId: psid,
+      earningsMonth: last.earningsMonth,
+      roomsTotal: last.roomsTotal,
+      roomsLet: roomsLet(periodBilled),
+      roomDaysLet: sum((row) => row.roomDaysLet),
+      roomDaysAvailable: sum((row) => row.roomDaysAvailable),
+      grossCents: sum((row) => row.grossCents),
+      feesCents: sum((row) => row.feesCents),
+      adjustmentsCents: sum((row) => row.adjustmentsCents),
+      hostEarningsCents: sum((row) => row.hostEarningsCents),
+      payoutCents: sum((row) => row.payoutCents),
+      netBilledCents: sum((row) => row.netBilledCents),
+      grossCollectedCents: sum((row) => row.grossCollectedCents),
+      activeMonthIndex: last.activeMonthIndex,
+      divesting: last.divesting,
+      inFlight: own.some((row) => row.inFlight),
+    };
+
+    const metrics = metricsFor(pm);
+    return {
+      ...pm,
+      propertyId: last.propertyId,
+      propertyName: last.propertyName,
+      metrics: {
+        ...metrics,
+        collectionRate: billedSettled > 0 ? (collectedSettled / billedSettled) * 100 : null,
+        delinquencyCents: billedSettled > 0 ? billedSettled - collectedSettled : 0,
+      },
+      bookingFeesCents: sum((row) => row.bookingFeesCents),
+      serviceFeesCents: sum((row) => row.serviceFeesCents),
+      membersActive: residentsBilled(periodBilled),
+      turnovers: sum((row) => row.turnovers),
+      turnoversProvisional: own.some((row) => row.turnoversProvisional),
+      cohortChargedCents: sum((row) => row.cohortChargedCents),
+      cohortCollectedCents: sum((row) => row.cohortCollectedCents),
+    };
+  }).sort((a, b) => a.propertyName.localeCompare(b.propertyName));
 
   const trueRoomRates = [...new Set(history.map((row) => row.propertyId))].map((propertyId) => {
     const own = history.filter((row) => row.propertyId === propertyId);
@@ -251,7 +322,13 @@ export async function getOperations(monthParam?: string): Promise<OperationsData
     return found;
   };
 
-  for (const bill of billed) {
+  // Scoped with everything else: a total that spans the portfolio beside a
+  // list that names one house is two different figures wearing one heading.
+  const inScope = propertyId
+    ? billed.filter((bill) => byPsid.get(bill.propertyExternalId ?? '')?.id === propertyId)
+    : billed;
+
+  for (const bill of inScope) {
     const memberId = bill.memberId ?? `unassigned:${bill.propertyExternalId ?? '?'}`;
     const row = entry(memberId, bill.earningsMonth);
     row.netBilledCents += -bill.amountCents; // charges negative, so owed is positive
@@ -375,6 +452,7 @@ export async function getOperations(monthParam?: string): Promise<OperationsData
 
   return {
     months,
+    selectedMonths: inPeriod,
     month,
     inFlight: inFlightMonths.has(month),
     rows,
@@ -386,7 +464,7 @@ export async function getOperations(monthParam?: string): Promise<OperationsData
     })),
     outstandingTotalCents: [...ageing.values()].reduce((sum, value) => sum + value, 0),
     memberBalances: balances.sort((a, b) => b.outstandingCents - a.outstandingCents).slice(0, 10),
-    rooms,
+    rooms: propertyId ? rooms.filter((room) => room.propertyId === propertyId) : rooms,
     currentOwedCents,
     movedOutOwedCents,
     daysToCollect: lags.length

@@ -1,11 +1,12 @@
 import Link from 'next/link';
 import { BottomLine, bottomLineOf, type WaterfallRow } from '@/components/BottomLine';
 import { PortfolioTabs } from '@/components/PortfolioTabs';
-import { getPortfolio, currentMonth } from '@/lib/queries';
+import { getPortfolio } from '@/lib/queries';
 import { prisma } from '@/lib/db';
 import { Badge, Empty, Money, Note, PageHeader, Panel, Pct, Td, Th } from '@/components/ui';
 import { VIEW_LABELS, type ViewKind } from '@/lib/engine/rollup';
-import { addMonthsToMonth } from '@/lib/engine/dates';
+import { ViewControls } from '@/components/ViewControls';
+import { resolveScope } from '@/lib/view-scope';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,20 +29,43 @@ function statusTone(status: string) {
 export default async function PortfolioPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string; view?: string; entity?: string }>;
+  searchParams: Promise<{
+    period?: string;
+    from?: string;
+    to?: string;
+    property?: string;
+    view?: string;
+    entity?: string;
+  }>;
 }) {
   const params = await searchParams;
-  const month = params.month ?? currentMonth();
   const view = (VIEWS.includes(params.view as ViewKind) ? params.view : 'portfolio') as ViewKind;
   const entityId = params.entity ?? null;
 
+  // Every month a rollup exists for, which is what a period can be resolved
+  // against — asking for a rolling year of an eight-month portfolio gives eight.
+  const stored = await prisma.monthlyPropertyRollup.findMany({
+    where: { basis: 'accrual' },
+    select: { month: true },
+    distinct: ['month'],
+    orderBy: { month: 'asc' },
+  });
+  const scope = await resolveScope(params, stored.map((r) => r.month));
+  const month = scope.period.months[scope.period.months.length - 1] ?? scope.to;
+
   const [data, entities] = await Promise.all([
-    getPortfolio(month, view, entityId),
+    getPortfolio(scope.period.months, view, entityId, scope.propertyId),
     prisma.entity.findMany({ orderBy: { name: 'asc' } }),
   ]);
 
   const link = (next: Record<string, string | null>) => {
-    const query = new URLSearchParams({ month, view, ...(entityId ? { entity: entityId } : {}) });
+    const query = new URLSearchParams({
+      period: scope.periodKey,
+      view,
+      ...(scope.propertyId ? { property: scope.propertyId } : {}),
+      ...(scope.periodKey === 'custom' ? { from: scope.from, to: scope.to } : {}),
+      ...(entityId ? { entity: entityId } : {}),
+    });
     for (const [key, value] of Object.entries(next)) {
       if (value === null) query.delete(key);
       else query.set(key, value);
@@ -93,23 +117,19 @@ export default async function PortfolioPage({
 
   return (
     <>
-      <PageHeader
-        title="Portfolio"
-        subtitle={VIEW_LABELS[view].description}
-        actions={
-          <div className="flex items-center gap-1">
-            <Link href={link({ month: addMonthsToMonth(month, -1) })} className="rounded border border-line px-2 py-1 text-[12px] text-muted hover:text-text">
-              ←
-            </Link>
-            <span className="num px-2 text-[13px]">{month}</span>
-            <Link href={link({ month: addMonthsToMonth(month, 1) })} className="rounded border border-line px-2 py-1 text-[12px] text-muted hover:text-text">
-              →
-            </Link>
-          </div>
-        }
-      />
+      <PageHeader title="Portfolio" subtitle={VIEW_LABELS[view].description} />
 
       <PortfolioTabs />
+
+      <ViewControls
+        period={scope.periodKey}
+        from={scope.from}
+        to={scope.to}
+        monthOptions={scope.monthOptions}
+        properties={scope.properties}
+        propertyId={scope.propertyId}
+        summary={scope.summary}
+      />
 
       <div className="mb-4 flex flex-wrap items-center gap-2 text-[13px]">
         {VIEWS.map((kind) => (
@@ -151,6 +171,14 @@ export default async function PortfolioPage({
         </Note>
       ) : null}
 
+      {scope.period.openMonths.length > 0 ? (
+        <Note>
+          This period includes {scope.period.openMonths.join(', ')}, which has not finished. Rent is still arriving,
+          the bank statement does not exist yet, and costs are missing — so every figure below is a partial one, and
+          low for that reason rather than any other. <strong>Last month</strong> is the period to judge on.
+        </Note>
+      ) : null}
+
       {data.crossesEntities ? (
         <Note tone="muted">These totals cross entities: {[...new Set(data.rows.map((r) => r.entityName))].join(', ')}.</Note>
       ) : null}
@@ -161,7 +189,7 @@ export default async function PortfolioPage({
           not — they describe how a property is performing, not how it is split, so they stay at property level.
         </Note>
       ) : null}
-      <BottomLine month={month} rows={waterfall} />
+      <BottomLine period={scope.summary} rows={waterfall} />
 
 
       <Panel>

@@ -115,6 +115,9 @@ export async function recomputePropertyMonth(propertyId: string, month: MonthKey
       pmFeeCents: 0,
       pmPaidOpexCents: 0,
       roomsOccupied: roomsLet(monthBilled),
+      roomDaysLet: roomDaysLet(everyBilled, window),
+      roomDaysAvailable: roomsTotal * window.days,
+      netBilledCents,
       // The same definition the operations page uses, from the same engine:
       // rent billed against the rent a full house would bill. Counting rooms
       // that collected a dollar scored a room paying $178 of $880 as full.
@@ -165,6 +168,9 @@ export async function recomputePropertyMonth(propertyId: string, month: MonthKey
     netCashCents: rollup.netCashCents,
     roomsTotal: rollup.roomsTotal,
     roomsOccupied: rollup.roomsOccupied,
+    roomDaysLet: rollup.roomDaysLet,
+    roomDaysAvailable: rollup.roomDaysAvailable,
+    netBilledCents: rollup.netBilledCents,
     occupancyRate: rollup.occupancyRate,
     collectionRate: rollup.collectionRate,
     delinquencyCents: rollup.delinquencyCents,

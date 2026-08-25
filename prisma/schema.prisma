@@ -709,8 +709,16 @@ model MonthlyPropertyRollup {
 
   roomsTotal        Int      @default(0)
   roomsOccupied     Int      @default(0)
+  /// Room-days let, and the room-days the house had to sell over the stretch
+  /// the export can speak to. Stored as the two halves rather than only the
+  /// rate, because a period covering several months has to add the halves —
+  /// averaging monthly occupancy rates is not the period's occupancy.
+  roomDaysLet       Int      @default(0)
+  roomDaysAvailable Int      @default(0)
   occupancyRate     Decimal? @db.Decimal(7, 3)
   collectionRate    Decimal? @db.Decimal(9, 3)
+  /// The halves behind the collection rate, for the same reason.
+  netBilledCents    Int      @default(0)
   delinquencyCents  Int      @default(0)
   trueRoomRateCents Int?
 

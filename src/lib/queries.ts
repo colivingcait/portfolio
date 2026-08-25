@@ -86,13 +86,27 @@ async function loadLoans(where: { propertyId?: string } = {}): Promise<LoanBundl
   }));
 }
 
-export async function getDebtByProperty(asOf: IsoDate, month: MonthKey): Promise<Map<string, PropertyDebt>> {
+/**
+ * Debt per property, as of a date and over a stretch of months.
+ *
+ * The balance is a position and is taken at `asOf`; debt service is a flow and
+ * is summed over every month asked for. Passing one month gives the old
+ * behaviour.
+ */
+export async function getDebtByProperty(
+  asOf: IsoDate,
+  months: MonthKey | readonly MonthKey[],
+): Promise<Map<string, PropertyDebt>> {
+  const span = typeof months === 'string' ? [months] : [...months];
   const loans = await loadLoans();
   const byProperty = new Map<string, PropertyDebt>();
 
   for (const loan of loans) {
     const balance = balanceAtDate(loan.terms, asOf, loan.payments);
-    const debtService = debtServiceForMonth(loan.terms, month, loan.payments);
+    const debtService = span.reduce(
+      (total, month) => total + debtServiceForMonth(loan.terms, month, loan.payments),
+      0,
+    );
     const maturity = maturityDateOf(loan.terms);
 
     const current = byProperty.get(loan.propertyId) ?? {
@@ -149,10 +163,15 @@ export interface PortfolioRow {
     collectionRate: number | null;
     tieStatus: string;
     inFlight: boolean;
+    /** How many months of the period actually had figures. */
+    monthsCovered: number;
   } | null;
 }
 
 export interface PortfolioData {
+  /** Every month the figures cover, ascending. */
+  months: MonthKey[];
+  /** The last of them, which is what a balance is "as of". */
   month: MonthKey;
   rows: PortfolioRow[];
   ownership: OwnershipContext;
@@ -161,33 +180,62 @@ export interface PortfolioData {
   hasAnyRollup: boolean;
 }
 
-export async function getPortfolio(month: MonthKey, view: ViewKind, entityId?: string | null): Promise<PortfolioData> {
-  const asOf = monthEnd(month);
+/**
+ * The portfolio across a stretch of months.
+ *
+ * Flow lines add up; balances do not. Debt balance is taken at the end of the
+ * period rather than summed, and a rate is rebuilt from its own two halves —
+ * occupancy over a quarter is room-days over room-days, never the mean of
+ * three monthly percentages.
+ */
+export async function getPortfolio(
+  months: readonly MonthKey[],
+  view: ViewKind,
+  entityId?: string | null,
+  propertyId?: string | null,
+): Promise<PortfolioData> {
+  const span = [...months].sort();
+  const first = span[0] ?? currentMonth();
+  const last = span[span.length - 1] ?? first;
+  const asOf = monthEnd(last);
 
   const statementMonths = await prisma.bankStatement.findMany({
-    where: { status: 'posted', periodStart: { lte: new Date(`${asOf}T00:00:00Z`) }, periodEnd: { gte: new Date(`${monthStart(month)}T00:00:00Z`) } },
+    where: { status: 'posted', periodStart: { lte: new Date(`${asOf}T00:00:00Z`) }, periodEnd: { gte: new Date(`${monthStart(first)}T00:00:00Z`) } },
     select: { bankAccount: { select: { propertyId: true } } },
   });
   const covered = new Set(statementMonths.map((s) => s.bankAccount.propertyId));
 
   const [properties, periods, ownership, debt, rollups] = await Promise.all([
     prisma.property.findMany({
-      where: entityId ? { titleEntityId: entityId } : {},
+      where: {
+        ...(entityId ? { titleEntityId: entityId } : {}),
+        ...(propertyId ? { id: propertyId } : {}),
+      },
       include: { titleEntity: true },
       orderBy: { name: 'asc' },
     }),
     prisma.managementPeriod.findMany(),
     getOwnershipContext(asOf),
-    getDebtByProperty(asOf, month),
-    prisma.monthlyPropertyRollup.findMany({ where: { month, basis: 'accrual' } }),
+    getDebtByProperty(asOf, span),
+    prisma.monthlyPropertyRollup.findMany({
+      where: { month: { in: span }, basis: 'accrual' },
+      orderBy: { month: 'asc' },
+    }),
   ]);
 
   const enginePeriods: ManagementPeriod[] = periods.map(toManagementPeriod);
-  const rollupByProperty = new Map(rollups.map((r) => [r.propertyId, r]));
+
+  const byProperty = new Map<string, typeof rollups>();
+  for (const row of rollups) {
+    const own = byProperty.get(row.propertyId) ?? [];
+    own.push(row);
+    byProperty.set(row.propertyId, own);
+  }
 
   const rows: PortfolioRow[] = properties.map((property) => {
-    const management = managementForMonth(enginePeriods, property.id, month);
-    const rollup = rollupByProperty.get(property.id);
+    const management = managementForMonth(enginePeriods, property.id, last);
+    const own = byProperty.get(property.id) ?? [];
+    const rollup = aggregateRollups(own);
     const sharePercent =
       view === 'portfolio' || view === 'property' ? 100 : (ownership.shares.get(property.id) ?? 0);
 
@@ -209,35 +257,63 @@ export async function getPortfolio(month: MonthKey, view: ViewKind, entityId?: s
       sharePercent,
       hasStatement: covered.has(property.id),
       debt: debt.get(property.id) ?? null,
-      rollup: rollup
-        ? {
-            revenueCents: rollup.revenueCents,
-            platformFeesCents: rollup.platformFeesCents,
-            pmFeeCents: rollup.pmFeeCents,
-            expectedDepositCents: rollup.expectedDepositCents,
-            depositVarianceCents: rollup.depositVarianceCents,
-            debtServiceCents: rollup.debtServiceCents,
-            depositReceivedCents: rollup.depositReceivedCents,
-            ownerPaidOpexCents: rollup.ownerPaidOpexCents,
-            netCashCents: rollup.netCashCents,
-            occupancyRate: rollup.occupancyRate ? Number(rollup.occupancyRate) : null,
-            collectionRate: rollup.collectionRate ? Number(rollup.collectionRate) : null,
-            tieStatus: rollup.tieStatus,
-            inFlight: rollup.inFlight,
-          }
-        : null,
+      rollup,
     };
   });
 
   const visible = view === 'my_share' || view === 'partner' ? rows.filter((r) => r.sharePercent > 0) : rows;
 
   return {
-    month,
+    months: span,
+    month: last,
     rows: visible,
     ownership,
     crossesEntities: new Set(visible.map((r) => r.entityId)).size > 1,
     unverifiedCount: visible.filter((r) => !r.dataVerified).length,
     hasAnyRollup: rollups.length > 0,
+  };
+}
+
+type StoredRollup = Awaited<ReturnType<typeof prisma.monthlyPropertyRollup.findMany>>[number];
+
+/**
+ * Several months of one property, as one set of figures.
+ *
+ * Returns null for a property with nothing in the period, which is different
+ * from a property that earned nothing — the caller renders those differently.
+ */
+function aggregateRollups(rows: StoredRollup[]): PortfolioRow['rollup'] {
+  if (rows.length === 0) return null;
+
+  const sum = (pick: (r: StoredRollup) => number) => rows.reduce((total, r) => total + pick(r), 0);
+  // Ordered by month, so the last row is the end of the period.
+  const end = rows[rows.length - 1];
+
+  const roomDays = sum((r) => r.roomDaysLet);
+  const roomDaysAvailable = sum((r) => r.roomDaysAvailable);
+  // A month still collecting has no collection rate, and lending its billed
+  // figure to the denominator would drag the period's rate down with it.
+  const settled = rows.filter((r) => !r.inFlight);
+  const billed = settled.reduce((total, r) => total + r.netBilledCents, 0);
+  const collected = settled.reduce((total, r) => total + r.revenueCents, 0);
+
+  return {
+    revenueCents: sum((r) => r.revenueCents),
+    platformFeesCents: sum((r) => r.platformFeesCents),
+    pmFeeCents: sum((r) => r.pmFeeCents),
+    expectedDepositCents: sum((r) => r.expectedDepositCents),
+    depositVarianceCents: sum((r) => r.depositVarianceCents),
+    debtServiceCents: sum((r) => r.debtServiceCents),
+    depositReceivedCents: sum((r) => r.depositReceivedCents),
+    ownerPaidOpexCents: sum((r) => r.ownerPaidOpexCents),
+    netCashCents: sum((r) => r.netCashCents),
+    occupancyRate: roomDaysAvailable > 0 ? (roomDays / roomDaysAvailable) * 100 : null,
+    collectionRate: billed > 0 ? (collected / billed) * 100 : null,
+    // The worst month decides: one month that does not tie makes the period
+    // untied, however many others balanced.
+    tieStatus: rows.some((r) => r.tieStatus !== 'tied') ? 'does_not_tie' : 'tied',
+    inFlight: rows.some((r) => r.inFlight),
+    monthsCovered: rows.length,
   };
 }
 

@@ -138,10 +138,10 @@ function PropertyCard({
               hint={property.inFlight ? 'Still collecting.' : 'Cash in against billed.'}
             />
             <Cell
-              label="Delinquency"
-              value={property.inFlight ? '—' : property.delinquencyCents > 0 ? formatCents(property.delinquencyCents) : 'caught up'}
+              label="Lost rent"
+              value={property.inFlight ? '—' : property.delinquencyCents > 0 ? formatCents(property.delinquencyCents) : 'all collected'}
               tone={!property.inFlight && property.delinquencyCents > 0 ? 'bad' : 'muted'}
-              hint={property.inFlight ? 'Withheld while collecting.' : 'Billed and not collected.'}
+              hint={property.inFlight ? 'Withheld while collecting.' : 'Billed and not collected — rent that will not arrive.'}
             />
 
             <Cell label="Booking fees" value={formatCents(property.bookingFeesCents)} hint="One per room that turned over." />

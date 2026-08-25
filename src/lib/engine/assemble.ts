@@ -106,6 +106,10 @@ export interface AssembleInput {
     pmFeeCents: Cents;
     pmPaidOpexCents: Cents;
     roomsOccupied: number;
+    /** The halves behind the rate, so a multi-month period can add them. */
+    roomDaysLet: number;
+    roomDaysAvailable: number;
+    netBilledCents: Cents;
     occupancyRate: number | null;
     collectionRate: number | null;
     delinquencyCents: Cents;
@@ -173,6 +177,9 @@ export function assemblePropertyRollup(input: AssembleInput): PropertyRollup {
 
     roomsTotal: input.roomsTotal,
     roomsOccupied: padsplit?.roomsOccupied ?? 0,
+    roomDaysLet: padsplit?.roomDaysLet ?? 0,
+    roomDaysAvailable: padsplit?.roomDaysAvailable ?? 0,
+    netBilledCents: padsplit?.netBilledCents ?? 0,
     occupancyRate: padsplit?.occupancyRate ?? null,
     collectionRate: padsplit?.collectionRate ?? null,
     delinquencyCents: padsplit?.delinquencyCents ?? 0,

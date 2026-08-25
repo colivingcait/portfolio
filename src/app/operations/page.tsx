@@ -7,16 +7,26 @@ import { RAMP, StackedBar, seriesColor } from '@/components/charts';
 import { PortfolioChart } from '@/components/PortfolioChart';
 import { PropertyBreakdown, type BreakdownProperty } from '@/components/PropertyBreakdown';
 import { METRICS } from '@/lib/engine/metrics-catalog';
+import { ViewControls } from '@/components/ViewControls';
+import { resolveScope } from '@/lib/view-scope';
+import { prisma } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
 export default async function OperationsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string }>;
+  searchParams: Promise<{ period?: string; from?: string; to?: string; property?: string }>;
 }) {
-  const { month: monthParam } = await searchParams;
-  const data = await getOperations(monthParam);
+  const params = await searchParams;
+
+  const stored = await prisma.summaryLine.findMany({
+    select: { earningsMonth: true },
+    distinct: ['earningsMonth'],
+    orderBy: { earningsMonth: 'asc' },
+  });
+  const scope = await resolveScope(params, stored.map((r) => r.earningsMonth));
+  const data = await getOperations(scope.period.months, scope.propertyId);
 
   if (!data.hasData) {
     return (
@@ -41,6 +51,10 @@ export default async function OperationsPage({
   const roomDaysAvailable = sum((r) => r.roomDaysAvailable);
   const occupancy = roomDaysAvailable > 0 ? (sum((r) => r.roomDaysLet) / roomDaysAvailable) * 100 : null;
   const turnoverTotal = sum((r) => r.turnovers);
+  const settledRows = data.rows.filter((row) => !row.inFlight);
+  const billedSettled = settledRows.reduce((total, row) => total + row.netBilledCents, 0);
+  const collectedSettled = settledRows.reduce((total, row) => total + row.grossCollectedCents, 0);
+  const collection = billedSettled > 0 ? (collectedSettled / billedSettled) * 100 : null;
   const turnoverProvisional = data.rows.some((r) => r.turnoversProvisional);
 
   // Colour follows the house, fixed everywhere, so hiding one series never
@@ -142,52 +156,49 @@ export default async function OperationsPage({
     <>
       <PageHeader
         title="Operations"
-        subtitle={`${data.month}${data.inFlight ? ' · still collecting' : ''} · occupancy, collections and what each room actually earns`}
+        subtitle={`${scope.propertyName ?? 'All properties'} · occupancy, collections and what each room earns`}
       />
       <PortfolioTabs />
 
-      <Explainer title="What this is and why it matters">
-        The operating view of the coliving houses, from the PadSplit export. Everything here is keyed to the{' '}
-        <strong>earnings month</strong> — the month the rent was for — which is deliberately not the month the money
-        arrives. PadSplit pays a month in arrears, so August&apos;s rent lands in September; the income belongs to
-        September on a cash basis and shows there in the{' '}
-        <Link href="/books/pnl" className="underline">profit &amp; loss</Link>, while occupancy and collections stay
-        here on August, where they mean something.
-        <div className="mt-1.5">
-          A month still collecting is marked <strong>in flight</strong>. Its collection rate and delinquency are
-          withheld rather than shown low, because they are not low — they are incomplete. A property&apos;s first month
-          is excluded from the true room rate for the same reason, and its second if occupancy was under 70%: a
-          half-filled ramp-up month would drag down a figure meant to describe the house running normally.
-        </div>
-        <div className="mt-1.5">
-          <strong>Occupancy and turnover are read off what was billed, never off what was paid.</strong> PadSplit
-          raises dues weekly in advance, so each charge is spread across the seven days it pays for and occupancy is
-          room-days let against room-days available — a room let for nine days of a month counts as nine days, and a
-          week raised on 30 July is credited to August rather than to July. The most recent month is measured only to
-          the last day the export has billed, because days nobody has been charged for yet are not vacant days. A
-          turnover is a tenancy ending, found where the next week&apos;s charge was due before the export was taken and
-          never came; that catches a resident who left with nobody lined up, which counting people per room could not.
-          Whether anyone then paid is the collection rate&apos;s job, and is deliberately a separate number.
-        </div>
+      <ViewControls
+        period={scope.periodKey}
+        from={scope.from}
+        to={scope.to}
+        monthOptions={scope.monthOptions}
+        properties={scope.properties}
+        propertyId={scope.propertyId}
+        summary={scope.summary}
+      />
+
+      <Explainer title="What this is">
+        Occupancy, collections and turnover from the PadSplit export, keyed to the{' '}
+        <strong>earnings month</strong> — the month the rent was for, not the month it arrived. The money side of the
+        same rent sits a month later in the{' '}
+        <Link href="/books/pnl" className="underline">profit &amp; loss</Link>, on a cash basis.
+        <details className="mt-1.5">
+          <summary className="cursor-pointer text-muted hover:text-text">How these are measured</summary>
+          <div className="mt-1.5 space-y-1.5">
+            <p>
+              <strong>Occupancy and turnover come off what was billed, never what was paid.</strong> Dues are raised
+              weekly in advance, so each charge is spread across the seven days it pays for: occupancy is room-days let
+              against room-days available, and a week raised on 30 July counts toward August. A turnover is a tenancy
+              ending — found where the next week&apos;s charge fell due before the export was taken and never came.
+            </p>
+            <p>
+              Whether anyone then paid is the <strong>collection rate</strong>, deliberately a separate number. It is
+              withheld for a month still collecting, because that figure is not low, it is incomplete. A property&apos;s
+              first month is left out of the true room rate for the same reason, and its second if occupancy was under
+              70%.
+            </p>
+          </div>
+        </details>
       </Explainer>
 
-      <div className="mb-5 flex flex-wrap items-center gap-1 text-[12px]">
-        <span className="mr-2 text-muted">Earnings month</span>
-        {data.months.map((m) => (
-          <Link
-            key={m}
-            href={`/operations?month=${m}`}
-            className={`rounded px-2 py-0.5 ${m === data.month ? 'bg-surface-2 text-text' : 'text-muted hover:text-text'}`}
-          >
-            {m}
-          </Link>
-        ))}
-      </div>
-
-      {data.inFlight ? (
+      {scope.period.openMonths.length > 0 ? (
         <Note>
-          {data.month} is still collecting, so collection rate and delinquency are not shown for it. Money is still
-          arriving against these charges.
+          This period includes {scope.period.openMonths.join(', ')}, which has not finished. Rent is still arriving
+          against those charges, so collection rate and lost rent are withheld — they are not low, they are
+          incomplete. <strong>Last month</strong> is the period to judge on.
         </Note>
       ) : null}
 
@@ -206,108 +217,129 @@ export default async function OperationsPage({
           hint={
             turnoverProvisional
               ? 'Tenancies that ended. Still rising — a move-out in the export’s last week is not yet visible.'
-              : 'Tenancies that ended this month.'
+              : 'Tenancies that ended in this period.'
           }
           tone={turnoverTotal > houseNames.length * 2 ? 'bad' : 'muted'}
         />
         <Stat
-          label="Outstanding"
-          value={formatCents(data.outstandingTotalCents)}
-          hint="Charged and never collected, all months."
-          tone={data.outstandingTotalCents > 0 ? 'bad' : 'muted'}
+          label="Collection rate"
+          value={collection === null ? '—' : `${collection.toFixed(0)}%`}
+          hint={collection === null ? 'Withheld while a month in this period is still collecting.' : 'Cash in against what was billed.'}
         />
       </div>
 
       <Panel
         title="Portfolio over time"
-        description={`One chart, pointed wherever you need it. Pick a measure and a span; click a house in the legend to drop it out of the comparison. ${METRICS.length} measures across ${data.months.length} months.`}
+        description={`History, with its own span — a trend needs more months than the period you are reporting on, so this one ignores the period above rather than collapsing to it. Pick a measure; click a house in the legend to drop it out. ${METRICS.length} measures across ${data.months.length} months.`}
       >
         <PortfolioChart months={data.months} houses={houses} values={values} totals={totals} />
       </Panel>
 
       <Panel
-        title={`Property breakdown · ${data.month}`}
-        description="Each house for the selected month. Open one for the full revenue flow and its rooms — the comparison that matters is between rooms under the same roof, where they differ by hundreds a month."
+        title="Property breakdown"
+        description="Each house over the selected period. Open one for the full revenue flow and its rooms — the comparison that matters is between rooms under the same roof, where they differ by hundreds a month."
       >
         <PropertyBreakdown properties={breakdown} months={data.months} />
       </Panel>
 
-      <div className="grid gap-5 lg:grid-cols-2">
-        <Panel
-          title="What is still owed"
-          description="Charges raised and never collected, aged by the month they were raised. Concessions are money given back and are not in here."
-        >
-          <StackedBar
-            segments={data.ageing.map((bucket, i) => ({ label: bucket.label, value: bucket.amountCents, color: RAMP[i] }))}
-          />
-          <table className="mt-3">
-            <tbody>
-              {data.ageing.map((bucket, i) => (
-                <tr key={bucket.label}>
-                  <Td>
-                    <span className="mr-2 inline-block h-2 w-2 rounded-[2px] align-middle" style={{ background: RAMP[i] }} />
-                    {bucket.label}
-                  </Td>
-                  <Td right>
-                    <Money cents={bucket.amountCents} />
-                  </Td>
-                  <Td right>
-                    <Pct value={data.outstandingTotalCents ? (bucket.amountCents / data.outstandingTotalCents) * 100 : null} digits={0} />
-                  </Td>
-                </tr>
-              ))}
-              <tr className="border-t border-line">
-                <Td><strong>Total</strong></Td>
-                <Td right><strong><Money cents={data.outstandingTotalCents} /></strong></Td>
-                <Td right />
-              </tr>
-            </tbody>
-          </table>
+      {/*
+        Lost rent, folded away.
+ 
+        It used to lead with a red "Outstanding" tile and two full panels, which
+        put a number nobody can act on in front of the ones they can. Almost none
+        of this is a receivable: most is owed by people who have already moved
+        out, and the collection data says money either arrives within thirty days
+        or never. So it is breakage — revenue that will not come — and it belongs
+        here, closed, as a figure to check monthly rather than daily.
+      */}
+      <details className="mb-5 rounded-lg border border-line bg-surface px-4 py-3">
+        <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-3 gap-y-1">
+          <span className="text-[13px] font-medium">Lost rent</span>
+          <span className="num text-[13px] text-muted">{formatCents(data.outstandingTotalCents)}</span>
+          <span className="text-[11px] text-muted">
+            billed and never collected, all time · {formatCents(data.movedOutOwedCents)} of it from people who have
+            already left
+          </span>
+        </summary>
 
-          <p className="mt-3 text-[11px] leading-relaxed text-muted">
-            <Money cents={data.movedOutOwedCents} /> of that is owed by people who have already left — money that
-            almost never arrives, and is better read as a write-off than a receivable. Only{' '}
-            <Money cents={data.currentOwedCents} /> is owed by someone still in a room.
-            {data.daysToCollect ? (
-              <>
-                {' '}When cash does come it comes fast: a median of {data.daysToCollect.median} days after the charge,
-                {' '}{data.daysToCollect.p90} at the ninetieth percentile. Past thirty days it is stuck, not slow.
-              </>
-            ) : null}
-          </p>
-        </Panel>
-
-        <Panel title="Who owes it" description="Outstanding by member, across every month.">
-          {data.memberBalances.length === 0 ? (
-            <Empty>Nothing outstanding.</Empty>
-          ) : (
-            <table>
-              <thead>
-                <tr>
-                  <Th>Member</Th>
-                  <Th>Property</Th>
-                  <Th right>Outstanding</Th>
-                </tr>
-              </thead>
+        <div className="mt-4 grid gap-5 lg:grid-cols-2">
+          <div>
+            <p className="mb-2 text-[11px] leading-relaxed text-muted">
+              Aged by the month the charge was raised. Concessions are money given back and are not in here.
+            </p>
+            <StackedBar
+              segments={data.ageing.map((bucket, i) => ({ label: bucket.label, value: bucket.amountCents, color: RAMP[i] }))}
+            />
+            <table className="mt-3">
               <tbody>
-                {data.memberBalances.map((member) => (
-                  <tr key={member.memberId}>
+                {data.ageing.map((bucket, i) => (
+                  <tr key={bucket.label}>
                     <Td>
-                      {member.memberName}
-                      {member.roomNumber ? <span className="ml-1.5 text-[11px] text-muted">room {member.roomNumber}</span> : null}
-                      {member.movedOut ? <Badge tone="muted">moved out</Badge> : null}
+                      <span className="mr-2 inline-block h-2 w-2 rounded-[2px] align-middle" style={{ background: RAMP[i] }} />
+                      {bucket.label}
                     </Td>
-                    <Td>
-                      <span className="text-[12px] text-muted">{member.propertyName}</span>
+                    <Td right>
+                      <Money cents={bucket.amountCents} />
                     </Td>
-                    <Td right><Money cents={member.outstandingCents} /></Td>
+                    <Td right>
+                      <Pct value={data.outstandingTotalCents ? (bucket.amountCents / data.outstandingTotalCents) * 100 : null} digits={0} />
+                    </Td>
                   </tr>
                 ))}
+                <tr className="border-t border-line">
+                  <Td><strong>Total</strong></Td>
+                  <Td right><strong><Money cents={data.outstandingTotalCents} /></strong></Td>
+                  <Td right />
+                </tr>
               </tbody>
             </table>
-          )}
-        </Panel>
-      </div>
+
+            <p className="mt-3 text-[11px] leading-relaxed text-muted">
+              Only <Money cents={data.currentOwedCents} /> of it is owed by someone still in a room; the rest is a
+              write-off in all but name.
+              {data.daysToCollect ? (
+                <>
+                  {' '}When rent does arrive it arrives fast — a median of {data.daysToCollect.median} days after the
+                  charge, {data.daysToCollect.p90} at the ninetieth percentile. Past thirty days it is not slow, it is
+                  gone.
+                </>
+              ) : null}
+            </p>
+          </div>
+
+          <div>
+            <p className="mb-2 text-[11px] leading-relaxed text-muted">Who it is owed by, largest first.</p>
+            {data.memberBalances.length === 0 ? (
+              <Empty>Nothing written off.</Empty>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <Th>Member</Th>
+                    <Th>Property</Th>
+                    <Th right>Lost rent</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.memberBalances.map((member) => (
+                    <tr key={member.memberId}>
+                      <Td>
+                        {member.memberName}
+                        {member.roomNumber ? <span className="ml-1.5 text-[11px] text-muted">room {member.roomNumber}</span> : null}
+                        {member.movedOut ? <Badge tone="muted">moved out</Badge> : null}
+                      </Td>
+                      <Td>
+                        <span className="text-[12px] text-muted">{member.propertyName}</span>
+                      </Td>
+                      <Td right><Money cents={member.outstandingCents} /></Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      </details>
 
       <Note tone="muted">
         Collection rate is money collected against what was billed <em>in that month</em>, and can exceed 100% when a

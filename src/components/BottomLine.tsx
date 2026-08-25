@@ -32,7 +32,7 @@ export interface WaterfallRow {
  * platform export, costs from the bank statement, debt service from the
  * amortization schedule. Reading them together is the entire point.
  */
-export function BottomLine({ rows, month }: { rows: WaterfallRow[]; month: string }) {
+export function BottomLine({ rows, period }: { rows: WaterfallRow[]; period: string }) {
   if (rows.length === 0) return null;
 
   const total = (pick: (row: WaterfallRow) => number) => rows.reduce((sum, row) => sum + pick(row), 0);
@@ -50,7 +50,7 @@ export function BottomLine({ rows, month }: { rows: WaterfallRow[]; month: strin
 
   return (
     <Panel
-      title={`What the houses actually made · ${month}`}
+      title={`What the houses actually made · ${period}`}
       description="Rent from PadSplit, costs from the bank, debt from the schedules. Each line comes from a different source, and no single one of them can answer this question alone."
     >
       <div className="overflow-x-auto">
@@ -107,7 +107,7 @@ export function BottomLine({ rows, month }: { rows: WaterfallRow[]; month: strin
 
       {missing.length > 0 ? (
         <p className="mt-3 text-[12px] leading-relaxed text-warn">
-          No bank statement imported for {missing.map((row) => row.propertyName).join(', ')} this month, so{' '}
+          No bank statement imported for {missing.map((row) => row.propertyName).join(', ')} over this period, so{' '}
           {missing.length === 1 ? 'its' : 'their'} operating costs are missing and the bottom line above is
           overstated. <Link href="/imports" className="underline">Import the statement</Link> to close it.
         </p>

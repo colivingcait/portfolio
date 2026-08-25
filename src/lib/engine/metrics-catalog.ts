@@ -60,9 +60,9 @@ export const METRICS: MetricSpec[] = [
   },
   {
     key: 'delinquency',
-    label: 'Delinquency',
+    label: 'Lost rent',
     unit: 'money',
-    note: 'Billed and not collected within the month. Blank while a month is still collecting.',
+    note: 'Billed and not collected. Read it as revenue that will not arrive rather than as a debt: money either lands within thirty days of the charge or it does not land. Blank while a month is still collecting.',
   },
   {
     key: 'perRoom',

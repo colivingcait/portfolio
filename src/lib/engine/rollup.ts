@@ -104,6 +104,9 @@ export interface PropertyRollup {
   // Non-proratable — operational
   roomsTotal: number;
   roomsOccupied: number;
+  roomDaysLet: number;
+  roomDaysAvailable: number;
+  netBilledCents: number;
   occupancyRate: number | null;
   collectionRate: number | null;
   delinquencyCents: Cents;
@@ -146,6 +149,9 @@ export function applyShare(rollup: PropertyRollup, sharePercent: number): Viewed
     // Untouched, deliberately.
     roomsTotal: rollup.roomsTotal,
     roomsOccupied: rollup.roomsOccupied,
+    roomDaysLet: rollup.roomDaysLet,
+    roomDaysAvailable: rollup.roomDaysAvailable,
+    netBilledCents: rollup.netBilledCents,
     occupancyRate: rollup.occupancyRate,
     collectionRate: rollup.collectionRate,
     delinquencyCents: rollup.delinquencyCents,
