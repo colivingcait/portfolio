@@ -699,6 +699,10 @@ model MonthlyPropertyRollup {
   operatingExpenseCents Int @default(0)
   noiCents              Int @default(0)
   depositReceivedCents  Int @default(0)
+  /// What the platform says will land, whether or not a statement is in yet.
+  expectedDepositCents  Int @default(0)
+  /// Actual less expected. Non-zero means the deposit was short, late or wrong.
+  depositVarianceCents  Int @default(0)
   debtServiceCents      Int @default(0)
   debtBalanceCents      Int @default(0)
   netCashCents          Int @default(0)

@@ -101,6 +101,8 @@ export interface AssembleInput {
     /** Refunded booking fees and the like. Income, but not rent. */
     adjustmentsCents: Cents;
     hostEarningsCents: Cents;
+    /** Host earnings plus adjustments — what the platform says will land. */
+    payoutCents: Cents;
     pmFeeCents: Cents;
     pmPaidOpexCents: Cents;
     roomsOccupied: number;
@@ -134,12 +136,20 @@ export function assemblePropertyRollup(input: AssembleInput): PropertyRollup {
     input.bank.ownerPaidOpexCents + pmPaidOpexCents + pmFeeCents + platformFeesCents;
   const noiCents = revenueCents - operatingExpenseCents;
 
-  // Net cash is what left the property's own account: money the PM never
-  // remitted was never in it, so only owner-paid costs and debt service apply.
-  const netCashCents =
-    (padsplit ? input.bank.depositReceivedCents : revenueCents) -
-    input.bank.ownerPaidOpexCents -
-    input.debtServiceCents;
+  // What should be in the account: money the platform or a manager kept was
+  // never in it, so only what actually lands, less owner-paid costs and debt
+  // service, is cash.
+  //
+  // Expected rather than observed on purpose. Reading the bank deposit here
+  // meant net cash was zero for any month whose statement had not been
+  // imported yet — indistinguishable from a month that genuinely broke even.
+  // The platform states what it will pay; the variance against what arrived is
+  // reported separately, where a missing or short deposit is visible as such.
+  const expectedDepositCents = padsplit ? padsplit.payoutCents : revenueCents;
+  const netCashCents = expectedDepositCents - input.bank.ownerPaidOpexCents - input.debtServiceCents;
+
+  // Only meaningful once a statement covering the month has been imported.
+  const depositVarianceCents = padsplit ? input.bank.depositReceivedCents - padsplit.payoutCents : 0;
 
   return {
     propertyId: input.propertyId,
@@ -155,6 +165,8 @@ export function assemblePropertyRollup(input: AssembleInput): PropertyRollup {
     operatingExpenseCents,
     noiCents,
     depositReceivedCents: input.bank.depositReceivedCents,
+    expectedDepositCents,
+    depositVarianceCents,
     debtServiceCents: input.debtServiceCents,
     debtBalanceCents: input.debtBalanceCents,
     netCashCents,

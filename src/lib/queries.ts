@@ -131,12 +131,19 @@ export interface PortfolioRow {
   feePercent: number | null;
   transitionMonth: boolean;
   sharePercent: number;
+  /** A posted statement covers this month, so zero costs means zero, not missing. */
+  hasStatement: boolean;
   debt: PropertyDebt | null;
   /** Present only once imports have run — step 2 onwards. */
   rollup: {
     revenueCents: number;
+    platformFeesCents: number;
+    pmFeeCents: number;
     depositReceivedCents: number;
+    expectedDepositCents: number;
+    depositVarianceCents: number;
     ownerPaidOpexCents: number;
+    debtServiceCents: number;
     netCashCents: number;
     occupancyRate: number | null;
     collectionRate: number | null;
@@ -156,6 +163,12 @@ export interface PortfolioData {
 
 export async function getPortfolio(month: MonthKey, view: ViewKind, entityId?: string | null): Promise<PortfolioData> {
   const asOf = monthEnd(month);
+
+  const statementMonths = await prisma.bankStatement.findMany({
+    where: { status: 'posted', periodStart: { lte: new Date(`${asOf}T00:00:00Z`) }, periodEnd: { gte: new Date(`${monthStart(month)}T00:00:00Z`) } },
+    select: { bankAccount: { select: { propertyId: true } } },
+  });
+  const covered = new Set(statementMonths.map((s) => s.bankAccount.propertyId));
 
   const [properties, periods, ownership, debt, rollups] = await Promise.all([
     prisma.property.findMany({
@@ -194,10 +207,16 @@ export async function getPortfolio(month: MonthKey, view: ViewKind, entityId?: s
       feePercent: management.effective?.feePercent ?? null,
       transitionMonth: management.transition,
       sharePercent,
+      hasStatement: covered.has(property.id),
       debt: debt.get(property.id) ?? null,
       rollup: rollup
         ? {
             revenueCents: rollup.revenueCents,
+            platformFeesCents: rollup.platformFeesCents,
+            pmFeeCents: rollup.pmFeeCents,
+            expectedDepositCents: rollup.expectedDepositCents,
+            depositVarianceCents: rollup.depositVarianceCents,
+            debtServiceCents: rollup.debtServiceCents,
             depositReceivedCents: rollup.depositReceivedCents,
             ownerPaidOpexCents: rollup.ownerPaidOpexCents,
             netCashCents: rollup.netCashCents,

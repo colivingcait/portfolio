@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { BottomLine, bottomLineOf, type WaterfallRow } from '@/components/BottomLine';
 import { PortfolioTabs } from '@/components/PortfolioTabs';
 import { getPortfolio, currentMonth } from '@/lib/queries';
 import { prisma } from '@/lib/db';
@@ -60,6 +61,35 @@ export default async function PortfolioPage({
     },
     { debtBalance: 0, debtService: 0, guaranteed: 0, rooms: 0, units: 0 },
   );
+
+  // Rent from the platform, costs from the bank, debt from the schedules —
+  // the join no single source can make on its own.
+  const waterfall: WaterfallRow[] = data.rows
+    .filter((row) => row.rollup && row.rollup.revenueCents !== 0)
+    .map((row) => {
+      const rollup = row.rollup!;
+      const debtServiceCents = row.debt?.monthlyDebtServiceCents ?? rollup.debtServiceCents;
+      return {
+        propertyId: row.id,
+        propertyName: row.name,
+        isPadSplit: row.revenueSource === 'padsplit',
+        grossRentCents: rollup.revenueCents,
+        platformFeesCents: rollup.platformFeesCents,
+        pmFeeCents: rollup.pmFeeCents,
+        adjustmentsCents: 0,
+        expectedDepositCents: rollup.expectedDepositCents,
+        depositReceivedCents: rollup.depositReceivedCents,
+        depositVarianceCents: rollup.depositVarianceCents,
+        ownerPaidOpexCents: rollup.ownerPaidOpexCents,
+        debtServiceCents,
+        bottomLineCents: bottomLineOf({
+          expectedDepositCents: rollup.expectedDepositCents,
+          ownerPaidOpexCents: rollup.ownerPaidOpexCents,
+          debtServiceCents,
+        }),
+        hasStatement: row.hasStatement,
+      };
+    });
 
   return (
     <>
@@ -131,6 +161,8 @@ export default async function PortfolioPage({
           not — they describe how a property is performing, not how it is split, so they stay at property level.
         </Note>
       ) : null}
+      <BottomLine month={month} rows={waterfall} />
+
 
       <Panel>
         {data.rows.length === 0 ? (

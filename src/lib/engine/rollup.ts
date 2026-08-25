@@ -37,6 +37,8 @@ export const PRORATABLE_METRICS = [
   'noiCents',
   'netCashCents',
   'depositReceivedCents',
+  'expectedDepositCents',
+  'depositVarianceCents',
   'debtServiceCents',
   'debtBalanceCents',
   'equityCents',
@@ -91,6 +93,10 @@ export interface PropertyRollup {
   operatingExpenseCents: Cents;
   noiCents: Cents;
   depositReceivedCents: Cents;
+  /** What the platform says will land. Defined whether or not a statement is in. */
+  expectedDepositCents: Cents;
+  /** Actual less expected. Non-zero means the deposit was short, late or wrong. */
+  depositVarianceCents: Cents;
   debtServiceCents: Cents;
   debtBalanceCents: Cents;
   netCashCents: Cents;

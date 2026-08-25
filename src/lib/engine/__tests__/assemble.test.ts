@@ -125,6 +125,7 @@ describe('assembling a PM-managed PadSplit month', () => {
       platformFeesCents: cents(800),
       adjustmentsCents: cents(0),
       hostEarningsCents: cents(8_700),
+      payoutCents: cents(6_900),
       pmFeeCents: cents(1_050),
       pmPaidOpexCents: cents(750),
       roomsOccupied: 7,

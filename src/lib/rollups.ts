@@ -85,6 +85,7 @@ export async function recomputePropertyMonth(propertyId: string, month: MonthKey
       platformFeesCents: -(summary.bookingFeesCents + summary.serviceFeesCents),
       adjustmentsCents: summary.adjustmentsCents,
       hostEarningsCents: summary.hostEarningsCents,
+      payoutCents: summary.totalPayoutCents,
       // A PM fee is charged on top of the platform's cut where a manager is
       // involved; self-managed coliving has none, and it is derived elsewhere.
       pmFeeCents: 0,
@@ -130,6 +131,8 @@ export async function recomputePropertyMonth(propertyId: string, month: MonthKey
     operatingExpenseCents: rollup.operatingExpenseCents,
     noiCents: rollup.noiCents,
     depositReceivedCents: rollup.depositReceivedCents,
+    expectedDepositCents: rollup.expectedDepositCents,
+    depositVarianceCents: rollup.depositVarianceCents,
     debtServiceCents: rollup.debtServiceCents,
     debtBalanceCents: rollup.debtBalanceCents,
     netCashCents: rollup.netCashCents,
