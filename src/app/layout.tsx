@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { AskBox } from '@/components/AskBox';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -36,6 +37,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 </Link>
               ))}
             </nav>
+            <div className="ml-auto">
+              <AskBox />
+            </div>
           </div>
         </header>
         <main className="mx-auto max-w-[1400px] px-6 py-6">{children}</main>
