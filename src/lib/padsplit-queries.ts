@@ -4,6 +4,9 @@ import { requireIsoDate } from './mappers';
 import {
   MEMBERSHIP_DUES,
   metricsFor,
+  residents,
+  roomsOccupied,
+  turnovers,
   trueRoomRate,
   type PropertyMonth,
   type PropertyMonthMetrics,
@@ -118,16 +121,22 @@ export async function getOperations(monthParam?: string): Promise<OperationsData
     const c = collected.filter((x) => x.propertyExternalId === s.propertyExternalId && x.earningsMonth === s.earningsMonth);
     const b = billed.filter((x) => x.propertyExternalId === s.propertyExternalId && x.earningsMonth === s.earningsMonth);
 
-    const rooms = new Set(
-      c.filter((x) => x.billType === MEMBERSHIP_DUES && x.category === 'collected' && x.roomExternalId).map((x) => x.roomExternalId as string),
-    );
+    // Reversed bookings are netted out by the engine: a booking that fell
+    // through appears as a charge and its mirror, and counting either as a
+    // resident put people in rooms they never took.
+    const lines = c.map((line) => ({
+      ...line,
+      category: line.category === 'adjustment' ? ('adjustment' as const) : ('collected' as const),
+      createdDate: requireIsoDate(line.createdDate),
+    }));
+    const occupied = roomsOccupied(lines);
     const charges = b.filter((x) => x.kind !== 'concession');
 
     const pm: PropertyMonth = {
       propertyExternalId: s.propertyExternalId,
       earningsMonth: s.earningsMonth,
-      roomsTotal: property.roomCount ?? rooms.size,
-      roomsOccupied: rooms.size,
+      roomsTotal: property.roomCount ?? occupied,
+      roomsOccupied: occupied,
       grossCents: s.grossCents,
       feesCents: s.bookingFeesCents + s.serviceFeesCents,
       adjustmentsCents: s.adjustmentsCents,
@@ -147,14 +156,8 @@ export async function getOperations(monthParam?: string): Promise<OperationsData
       metrics: metricsFor(pm),
       bookingFeesCents: s.bookingFeesCents,
       serviceFeesCents: s.serviceFeesCents,
-      membersActive: new Set(c.map((x) => x.memberId).filter(Boolean)).size,
-      // A room with two payers in a month changed hands once. Counting people
-      // and calling it occupancy read as eleven members in eight rooms, which
-      // looked like a bug and was actually the most useful number on the page.
-      turnovers: [...new Set(c.map((x) => x.roomExternalId).filter(Boolean))].reduce((count, room) => {
-        const people = new Set(c.filter((x) => x.roomExternalId === room).map((x) => x.memberId).filter(Boolean));
-        return count + Math.max(0, people.size - 1);
-      }, 0),
+      membersActive: residents(lines),
+      turnovers: turnovers(lines),
       cohortChargedCents: -charges.reduce((sum, x) => sum + x.amountCents, 0),
       cohortCollectedCents: charges.reduce((sum, x) => sum + (paidByBill.get(x.billId) ?? 0), 0),
     };
@@ -266,16 +269,21 @@ export async function getOperations(monthParam?: string): Promise<OperationsData
   // months is a specific thing to go and look at.
   const roomKey = (line: (typeof collected)[number]) => `${line.propertyExternalId}|${line.roomNumber}`;
   const roomTotals = new Map<string, Map<string, number>>();
-  const roomPeople = new Map<string, Set<string>>();
+  // Netted per member so a booking that fell through is not a person who lived
+  // here: charged and reversed sums to zero, and only a positive total counts.
+  const roomMemberNet = new Map<string, Map<string, number>>();
   for (const line of collected) {
     if (!line.roomNumber || !line.propertyExternalId || line.category !== 'collected') continue;
     const key = roomKey(line);
     const byMonth = roomTotals.get(key) ?? new Map<string, number>();
     byMonth.set(line.earningsMonth, (byMonth.get(line.earningsMonth) ?? 0) + line.hostEarningsCents);
     roomTotals.set(key, byMonth);
-    const people = roomPeople.get(key) ?? new Set<string>();
-    if (line.memberId) people.add(line.memberId);
-    roomPeople.set(key, people);
+
+    if (line.memberId && line.billType === MEMBERSHIP_DUES) {
+      const net = roomMemberNet.get(key) ?? new Map<string, number>();
+      net.set(line.memberId, (net.get(line.memberId) ?? 0) + line.amountCents);
+      roomMemberNet.set(key, net);
+    }
   }
 
   const rooms: RoomHistory[] = [...roomTotals.entries()]
@@ -290,7 +298,7 @@ export async function getOperations(monthParam?: string): Promise<OperationsData
         roomNumber,
         byMonth: values,
         medianCents: earned.length ? earned[Math.floor(earned.length / 2)] : null,
-        people: roomPeople.get(key)?.size ?? 0,
+        people: [...(roomMemberNet.get(key)?.values() ?? [])].filter((cents) => cents > 0).length,
       };
     })
     .sort((a, b) => a.propertyName.localeCompare(b.propertyName) || Number(a.roomNumber) - Number(b.roomNumber));

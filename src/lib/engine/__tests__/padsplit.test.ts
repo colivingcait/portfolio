@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  residents,
+  turnovers,
   collectionRate,
   comparableMonths,
   delinquency,
@@ -188,5 +190,84 @@ describe('true room rate (§6)', () => {
 
   it('returns null when nothing is usable yet', () => {
     expect(trueRoomRate([propertyMonth({ activeMonthIndex: 1 })])).toBeNull();
+  });
+});
+
+describe('dues that get reversed', () => {
+  // Two different things make this shape and the export cannot tell them
+  // apart: a booking request that never became a move-in, and a resident moved
+  // between rooms. Netting handles both — the reversed side drops out, the
+  // side that kept the money counts — so neither needs identifying.
+  // Counting any dues line as occupancy instead put people in rooms they never
+  // took: Glen Mora read 7 of 8 rooms in a month it had 5.
+  const reversal = (room: string, member: string, dollars: number) => [
+    collected({ roomExternalId: room, memberId: member, amountCents: cents(dollars) }),
+    collected({ roomExternalId: room, memberId: member, amountCents: cents(-dollars) }),
+  ];
+
+  it('does not count a room whose only dues were reversed', () => {
+    expect(roomsOccupied(reversal('room-1', 'm1', 218))).toBe(0);
+  });
+
+  it('still counts a room where the dues stuck', () => {
+    expect(roomsOccupied([collected({ roomExternalId: 'room-1', memberId: 'm1' })])).toBe(1);
+  });
+
+  it('counts a room once when the reversal is followed by someone who stayed', () => {
+    const lines = [
+      ...reversal('room-1', 'ghost', 218),
+      collected({ roomExternalId: 'room-1', memberId: 'real', amountCents: cents(700) }),
+    ];
+    expect(roomsOccupied(lines)).toBe(1);
+    expect(residents(lines)).toBe(1);
+    expect(turnovers(lines)).toBe(0);
+  });
+
+  it('counts a genuine change of occupant as one turnover', () => {
+    const lines = [
+      collected({ roomExternalId: 'room-1', memberId: 'left', amountCents: cents(300) }),
+      collected({ roomExternalId: 'room-1', memberId: 'arrived', amountCents: cents(400) }),
+    ];
+    expect(residents(lines)).toBe(2);
+    expect(turnovers(lines)).toBe(1);
+  });
+
+  it('keeps a member whose payment PadSplit kept entirely as a booking fee', () => {
+    // They did move in; the host simply earned nothing that month. That is a
+    // fact about the money, not about whether the room was occupied.
+    const lines = [
+      collected({ roomExternalId: 'room-1', memberId: 'm1', amountCents: cents(104), hostEarningsCents: 0, bookingFeeCents: cents(-104) }),
+    ];
+    expect(roomsOccupied(lines)).toBe(1);
+    expect(residents(lines)).toBe(1);
+  });
+
+  it('ignores anything that is not dues, and anything not collected', () => {
+    expect(roomsOccupied([collected({ roomExternalId: 'room-9', billType: 'Late Fees' })])).toBe(0);
+    expect(roomsOccupied([collected({ roomExternalId: 'room-9', category: 'adjustment' })])).toBe(0);
+  });
+});
+
+describe('a resident moved between rooms', () => {
+  // The real case this was found on: dues charged against the old room and
+  // reversed there, with the money landing on the new room's bill. The person
+  // is one resident, not two, and belongs to the room that kept the money.
+  const lines = [
+    collected({ roomExternalId: 'room-5', memberId: 'corey', amountCents: cents(218) }),
+    collected({ roomExternalId: 'room-5', memberId: 'corey', amountCents: cents(-218) }),
+    collected({ roomExternalId: 'room-6', memberId: 'corey', amountCents: cents(218) }),
+    collected({ roomExternalId: 'room-6', memberId: 'corey', amountCents: cents(222) }),
+  ];
+
+  it('counts one occupied room, not two', () => {
+    expect(roomsOccupied(lines)).toBe(1);
+  });
+
+  it('counts one resident, not two', () => {
+    expect(residents(lines)).toBe(1);
+  });
+
+  it('is not a turnover — nobody left and nobody arrived', () => {
+    expect(turnovers(lines)).toBe(0);
   });
 });

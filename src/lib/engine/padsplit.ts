@@ -133,15 +133,74 @@ export function collectionRate(netBilledCents: Cents, grossCollectedCents: Cents
   return (grossCollectedCents / netBilledCents) * 100;
 }
 
-/** rooms_occupied = distinct Room IDs, Bill Type 'Membership Dues', Category 'collected'. */
-export function roomsOccupied(lines: readonly CollectionLine[]): number {
-  const rooms = new Set<string>();
-  for (const l of lines) {
-    if (l.billType === MEMBERSHIP_DUES && l.category === 'collected' && l.roomExternalId) {
-      rooms.add(l.roomExternalId);
-    }
+/**
+ * Dues that survived, netted per room and per member.
+ *
+ * A dues charge that is later undone is not absent from the export — it is
+ * charged and then reversed, same bill, usually the same day, and both halves
+ * are Membership Dues marked collected. Two different things produce that
+ * shape and the data cannot tell them apart:
+ *
+ *   - a booking request that never became a move-in;
+ *   - a resident moved between rooms, where the old room is reversed and the
+ *     new one charged.
+ *
+ * Netting handles both without needing to know which. The reversed side sums
+ * to zero and drops out; the side where the money stuck counts. A transferred
+ * resident is counted once, in the room that kept the money, rather than twice
+ * or in the room they left.
+ *
+ * Counting distinct rooms with any dues line instead put people in rooms they
+ * never occupied: Glen Mora read 7 of 8 rooms in a month it had 5. Sixteen
+ * member-months in one real export net to exactly zero this way.
+ *
+ * A member who paid something PadSplit then kept entirely as a booking fee did
+ * move in and is counted — the host earned nothing that month, which is a fact
+ * about the money and not about whether the room was occupied.
+ */
+function netDuesBy(
+  lines: readonly CollectionLine[],
+  key: (line: CollectionLine) => string | null,
+): Map<string, Cents> {
+  const totals = new Map<string, Cents>();
+  for (const line of lines) {
+    if (line.billType !== MEMBERSHIP_DUES || line.category !== 'collected') continue;
+    const id = key(line);
+    if (!id) continue;
+    totals.set(id, (totals.get(id) ?? 0) + line.amountCents);
   }
-  return rooms.size;
+  return totals;
+}
+
+export function roomsOccupied(lines: readonly CollectionLine[]): number {
+  return [...netDuesBy(lines, (l) => l.roomExternalId).values()].filter((cents) => cents > 0).length;
+}
+
+/** People who actually took a room, reversed bookings excluded. */
+export function residents(lines: readonly CollectionLine[]): number {
+  return [...netDuesBy(lines, (l) => l.memberId).values()].filter((cents) => cents > 0).length;
+}
+
+/**
+ * Rooms that changed hands: people beyond one per occupied room.
+ *
+ * Two payers in one room over a month is one turnover. Reversed bookings are
+ * excluded on both sides, or a room that was merely enquired about would look
+ * like a room that emptied and refilled.
+ */
+export function turnovers(lines: readonly CollectionLine[]): number {
+  const byRoom = new Map<string, Set<string>>();
+  const netByRoomMember = netDuesBy(lines, (l) => (l.roomExternalId && l.memberId ? `${l.roomExternalId}|${l.memberId}` : null));
+
+  for (const [key, cents] of netByRoomMember) {
+    if (cents <= 0) continue;
+    const [room, member] = key.split('|');
+    const people = byRoom.get(room) ?? new Set<string>();
+    people.add(member);
+    byRoom.set(room, people);
+  }
+
+  return [...byRoom.values()].reduce((total, people) => total + Math.max(0, people.size - 1), 0);
 }
 
 export function occupancyRate(occupied: number, roomsTotal: number): number | null {
