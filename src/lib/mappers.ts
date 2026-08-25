@@ -91,7 +91,7 @@ export function toLoanPayment(payment: LoanPaymentRow): LoanPaymentRecord {
     interestCents: payment.interestCents,
     escrowCents: payment.escrowCents,
     extraPrincipalCents: payment.extraPrincipalCents,
-    source: payment.source === 'scheduled' ? 'scheduled' : 'actual',
+    source: payment.source === 'scheduled' || payment.source === 'advance' ? payment.source : 'actual',
   };
 }
 

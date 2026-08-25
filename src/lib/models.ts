@@ -488,7 +488,7 @@ export const MODELS: Record<ModelKey, ModelSpec> = {
         type: 'select',
         required: true,
         span: 2,
-        options: opts(['actual', 'Actual'], ['scheduled', 'Scheduled']),
+        options: opts(['actual', 'Actual'], ['scheduled', 'Scheduled'], ['advance', 'Interest paid ahead']),
         defaultValue: 'actual',
       },
     ],

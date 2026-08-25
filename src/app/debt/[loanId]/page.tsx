@@ -6,7 +6,9 @@ import { AddPanel } from '@/components/AddPanel';
 import { RecordForm } from '@/components/RecordForm';
 import { withOptions } from '@/lib/form-helpers';
 import { balanceAtDate, buildSchedule, maturityDateOf, payoffAmount, daysToMaturity } from '@/lib/engine/amortization';
+import { interestSummary, interestYear, interestYears } from '@/lib/engine/interest';
 import { formatCents } from '@/lib/engine/money';
+import { InterestAdvanceForm } from '@/components/InterestAdvanceForm';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,11 +18,18 @@ export default async function LoanPage({ params }: { params: Promise<{ loanId: s
   if (!detail) notFound();
 
   const asOf = todayIso();
+  const thisYear = Number(asOf.slice(0, 4));
   const { loan, terms, payments } = detail;
   const schedule = buildSchedule(terms, payments);
   const balance = balanceAtDate(terms, asOf, payments);
   const payoff = payoffAmount(terms, asOf, payments);
   const remaining = schedule.filter((row) => row.dueDate > asOf);
+
+  // The interest ledger, which is the question a private lender is actually
+  // asked: what does the year cost, and having sent them a lump, what is left.
+  const interest = interestSummary(terms, payments, asOf);
+  const years = interestYears(terms, payments).map((year) => interestYear(terms, payments, year));
+  const advances = payments.filter((payment) => payment.source === 'advance');
 
   return (
     <>
@@ -56,6 +65,97 @@ export default async function LoanPage({ params }: { params: Promise<{ loanId: s
         This schedule is what turns the single mortgage debit on the bank statement into two P&amp;L lines. The bank
         shows one number; the schedule explains it — no categorization required.
       </Note>
+
+      <Panel
+        title="Interest"
+        description="What the note charges, against what has been paid. A private lender settled in lumps rather than monthly is the case this exists for: an advance is credited forward against the periods it covers, so what is left to pay falls rather than the same money being counted twice."
+      >
+        <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Stat
+            label={`${thisYear} interest`}
+            value={formatCents(years.find((y) => y.year === thisYear)?.accruedCents ?? 0)}
+            hint="What the note charges across the calendar year."
+          />
+          <Stat
+            label="Paid ahead"
+            value={formatCents(interest.creditCents)}
+            hint={
+              interest.paidThrough
+                ? `Covered through ${interest.paidThrough}.`
+                : 'No interest has been paid ahead of its period.'
+            }
+          />
+          <Stat
+            label="In arrears"
+            value={interest.arrearsCents > 0 ? formatCents(interest.arrearsCents) : '—'}
+            hint="Fallen due, not covered and not paid."
+          />
+          <Stat
+            label="Left to maturity"
+            value={formatCents(interest.remainingToMaturityCents)}
+            hint={`Cash still to pay between now and ${interest.maturityDate}.`}
+          />
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <Th>Year</Th>
+              <Th right>Periods</Th>
+              <Th right>Interest charged</Th>
+              <Th right>Paid ahead</Th>
+              <Th right>Paid as due</Th>
+              <Th right>Still to pay</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {years.map((year) => (
+              <tr key={year.year} className={year.year === thisYear ? '' : 'text-muted'}>
+                <Td>
+                  <span className="num">{year.year}</span>
+                </Td>
+                <Td right>
+                  <span className="num">{year.periods}</span>
+                </Td>
+                <Td right><Money cents={year.accruedCents} /></Td>
+                <Td right>{year.advancesPaidCents ? <Money cents={year.advancesPaidCents} /> : <span className="num text-muted">—</span>}</Td>
+                <Td right>{year.periodPaidCents ? <Money cents={year.periodPaidCents} /> : <span className="num text-muted">—</span>}</Td>
+                <Td right>{year.cashDueCents ? <Money cents={year.cashDueCents} /> : <span className="num text-muted">nothing owing</span>}</Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <div className="mt-4 border-t border-line pt-4">
+          <p className="mb-2 text-[11px] leading-relaxed text-muted">
+            Record a lump-sum interest payment. It lands as cash in the month it was written and is then credited
+            against each period until it runs out — it does not pay down principal, because prepaying interest never
+            does.
+          </p>
+          <InterestAdvanceForm loanId={loanId} today={asOf} />
+        </div>
+
+        {advances.length > 0 ? (
+          <table className="mt-4">
+            <thead>
+              <tr>
+                <Th>Interest paid ahead</Th>
+                <Th right>Amount</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {advances.map((advance) => (
+                <tr key={`${advance.date}-${advance.interestCents}`}>
+                  <Td>
+                    <span className="num">{advance.date}</span>
+                  </Td>
+                  <Td right><Money cents={advance.interestCents} /></Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : null}
+      </Panel>
 
       <Panel title="Amortization schedule" description="Rows marked actual come from recorded payments; the rest are derived from the terms.">
         <div className="max-h-[70vh] overflow-auto">

@@ -61,7 +61,16 @@ export interface LoanPaymentRecord {
   interestCents: Cents;
   escrowCents: Cents;
   extraPrincipalCents: Cents;
-  source: 'scheduled' | 'actual';
+  /**
+   * scheduled = derived from the terms; actual = a period's payment as it
+   * really happened; advance = interest paid ahead of when it falls due.
+   *
+   * An advance is deliberately not a period payment. A private lender paid
+   * a year of interest in one cheque has been paid for twelve periods, not
+   * given one enormous one — so it never overwrites a schedule row, never
+   * touches principal, and is consumed forward against the periods it covers.
+   */
+  source: 'scheduled' | 'actual' | 'advance';
 }
 
 export interface ScheduleRow {
@@ -261,6 +270,88 @@ export function buildSchedule(
   return rows;
 }
 
+/**
+ * Interest paid ahead of time, spread over the periods it covers.
+ *
+ * Private notes are frequently settled in lumps — a year of interest in one
+ * cheque rather than twelve. Recording that as a period payment would put the
+ * whole year's interest in one month and still show every later month as owing,
+ * so the money would be counted twice and the lender would look unpaid.
+ *
+ * Instead an advance becomes a credit at the month it was paid, and each
+ * period draws on it until it runs out. What the credit does not cover is
+ * still due in cash. Principal is untouched: prepaying interest does not buy
+ * down a note.
+ */
+export interface InterestCoverageRow {
+  period: number;
+  dueDate: IsoDate;
+  month: MonthKey;
+  /** What the note charges for this period, from the terms. */
+  accruedCents: Cents;
+  /** Met out of an advance rather than paid this period. */
+  coveredCents: Cents;
+  /** Still to pay in cash for this period. */
+  cashDueCents: Cents;
+  /** Advance paid in this month, which is cash out now whatever it covers. */
+  advancePaidCents: Cents;
+  /** Credit left over after this period. */
+  creditAfterCents: Cents;
+}
+
+export function interestCoverage(
+  terms: LoanTerms,
+  payments: readonly LoanPaymentRecord[] = [],
+): InterestCoverageRow[] {
+  const advances = new Map<MonthKey, Cents>();
+  for (const payment of payments) {
+    if (payment.source !== 'advance') continue;
+    const month = monthOf(payment.date);
+    advances.set(month, (advances.get(month) ?? 0) + payment.interestCents);
+  }
+
+  // The schedule already ignores anything that is not an actual period
+  // payment, so it gives accrual from the terms with advances left out.
+  const rows = buildSchedule(terms, payments);
+  let credit = 0;
+
+  const covered = rows.map((row) => {
+    const advancePaid = advances.get(row.month) ?? 0;
+    credit += advancePaid;
+    const coveredCents = Math.min(credit, row.interestCents);
+    credit -= coveredCents;
+    return {
+      period: row.period,
+      dueDate: row.dueDate,
+      month: row.month,
+      accruedCents: row.interestCents,
+      coveredCents,
+      cashDueCents: row.interestCents - coveredCents,
+      advancePaidCents: advancePaid,
+      creditAfterCents: credit,
+    };
+  });
+
+  // An advance paid after the last scheduled period still happened. It has
+  // nothing left to cover, but the cash left the account.
+  const months = new Set(rows.map((row) => row.month));
+  for (const [month, cents] of advances) {
+    if (months.has(month)) continue;
+    covered.push({
+      period: 0,
+      dueDate: `${month}-01`,
+      month,
+      accruedCents: 0,
+      coveredCents: 0,
+      cashDueCents: 0,
+      advancePaidCents: cents,
+      creditAfterCents: credit + cents,
+    });
+  }
+
+  return covered.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+}
+
 /** Balance outstanding at a date, honouring actual payments made by then. */
 export function balanceAtDate(
   terms: LoanTerms,
@@ -326,14 +417,27 @@ export function splitForMonth(
   };
 }
 
-/** Debt service for a month: principal + interest, escrow excluded. */
+/**
+ * Debt service for a month: principal + interest, escrow excluded.
+ *
+ * Cash, not accrual. Interest already met by an advance is not due again in
+ * the month it falls in — it left the account when the advance was written —
+ * and the advance itself lands in the month it was paid.
+ */
 export function debtServiceForMonth(
   terms: LoanTerms,
   month: MonthKey,
   payments: readonly LoanPaymentRecord[] = [],
 ): Cents {
+  const advanced = payments.some((p) => p.source === 'advance');
   const split = splitForMonth(terms, month, payments);
-  return split ? split.principalCents + split.interestCents : 0;
+  if (!advanced) return split ? split.principalCents + split.interestCents : 0;
+
+  const coverage = interestCoverage(terms, payments).filter((row) => row.month === month);
+  const advancePaid = coverage.reduce((total, row) => total + row.advancePaidCents, 0);
+  const interestDue = coverage.reduce((total, row) => total + row.cashDueCents, 0);
+  const principal = split ? split.principalCents : 0;
+  return principal + interestDue + advancePaid;
 }
 
 export interface MaturityLadderEntry<T> {
