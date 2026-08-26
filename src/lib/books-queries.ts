@@ -6,6 +6,8 @@ import { buildBalanceSheet, buildPnl, type BalanceSheet, type LedgerLine, type P
 import { monthOf, type MonthKey } from './engine/dates';
 import { getCategoryCatalog } from './categories-queries';
 import { category, type CategoryCatalog } from './engine/categories';
+import { findReversals } from './engine/bank';
+import { formatCents } from './engine/money';
 
 export interface TransactionFilters {
   propertyId?: string;
@@ -33,6 +35,20 @@ export interface RegisterRow {
   statementId: string;
   isSplit: boolean;
   splits: { id: string; categoryKey: string | null; categoryLabel: string | null; amountCents: number; memo: string | null }[];
+  /**
+   * Where the row has no category yet, what to open the picker on. A credit is
+   * nearly always income and a debit nearly always a cost — a starting point,
+   * not a guess that saves itself.
+   */
+  suggestion: string | null;
+  /** Set where the row looks like it cancels another one, or is cancelled by it. */
+  reversalOf: {
+    description: string;
+    date: string;
+    amount: string;
+    /** Null where the other half has not been categorized either. */
+    categoryLabel: string | null;
+  } | null;
 }
 
 export interface RegisterPage {
@@ -46,6 +62,8 @@ export interface RegisterPage {
   categories: { key: string; label: string }[];
   properties: { value: string; label: string }[];
   accounts: { value: string; label: string }[];
+  /** Rows still unfiled, across everything — not just what the filter matched. */
+  uncategorized: number;
 }
 
 const PAGE_SIZE = 100;
@@ -99,7 +117,7 @@ export async function getRegister(filters: TransactionFilters): Promise<Register
       : {}),
   };
 
-  const [rows, total, sums, properties, accounts] = await Promise.all([
+  const [rows, total, sums, properties, accounts, uncategorized] = await Promise.all([
     prisma.bankTransaction.findMany({
       where,
       include: {
@@ -116,13 +134,23 @@ export async function getRegister(filters: TransactionFilters): Promise<Register
     prisma.bankTransaction.findMany({ where, select: { amountCents: true } }),
     prisma.property.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } }),
     prisma.bankAccount.findMany({ include: { property: true }, orderBy: { label: 'asc' } }),
+    // Deliberately unfiltered: the backlog is a fact about the books, not about
+    // whatever the filter happens to be narrowed to.
+    prisma.bankTransaction.count({ where: { splitParentId: null, categoryKey: null, splits: { none: {} } } }),
   ]);
+
+  const reversals = await findReversalHints(rows);
 
   return {
     rows: rows.map((row) => ({
       id: row.id,
       date: requireIsoDate(row.date),
       propertyName: row.statement.bankAccount.property.name,
+      suggestion:
+        row.categoryKey === null
+          ? (reversals.get(row.id)?.categoryKey ?? (row.amountCents > 0 ? 'rental_income' : 'maintenance_repairs'))
+          : null,
+      reversalOf: row.categoryKey === null ? (reversals.get(row.id)?.hint ?? null) : null,
       accountLabel: row.statement.bankAccount.label,
       description: row.description,
       memo: row.memo,
@@ -148,6 +176,7 @@ export async function getRegister(filters: TransactionFilters): Promise<Register
     categories: catalog.map((c) => ({ key: c.key, label: c.label })),
     properties: properties.map((p) => ({ value: p.id, label: p.name })),
     accounts: accounts.map((a) => ({ value: a.id, label: `${a.property.name} · ${a.label}` })),
+    uncategorized,
   };
 }
 
@@ -262,4 +291,77 @@ export async function getBalanceSheet(basis: 'cost' | 'market'): Promise<Balance
   );
 
   return { ...sheet, asOf: today };
+}
+
+/**
+ * Charges the bank later reversed, paired with the row that cancelled them.
+ *
+ * Looked for against every row on the account rather than only the ones still
+ * needing a category: the charge is usually categorized already and it is the
+ * reversal that is still sitting unfiled. Scoped per account, since a fee on
+ * one house has nothing to do with a credit of the same size on another.
+ *
+ * This used to live on the Review page. It moved here when Review and the
+ * register became one screen, so the hint follows the row wherever it is shown.
+ */
+async function findReversalHints(
+  visible: readonly { id: string; categoryKey: string | null }[],
+): Promise<Map<string, { categoryKey: string | null; hint: RegisterRow['reversalOf'] }>> {
+  const found = new Map<string, { categoryKey: string | null; hint: RegisterRow['reversalOf'] }>();
+  const needed = visible.filter((row) => row.categoryKey === null);
+  if (needed.length === 0) return found;
+
+  const [everything, catalog] = await Promise.all([
+    prisma.bankTransaction.findMany({
+      select: {
+        id: true,
+        date: true,
+        description: true,
+        amountCents: true,
+        categoryKey: true,
+        statement: { select: { bankAccountId: true } },
+      },
+    }),
+    getCategoryCatalog(),
+  ]);
+
+  const byAccount = new Map<string, typeof everything>();
+  for (const transaction of everything) {
+    const list = byAccount.get(transaction.statement.bankAccountId) ?? [];
+    list.push(transaction);
+    byAccount.set(transaction.statement.bankAccountId, list);
+  }
+
+  const label = (key: string | null) => (key ? (category(key, catalog)?.label ?? null) : null);
+
+  for (const rows of byAccount.values()) {
+    const pairs = findReversals(
+      rows.map((r) => ({ date: requireIsoDate(r.date), description: r.description, amountCents: r.amountCents })),
+    );
+    for (const pair of pairs) {
+      // Either half can be the one still needing a category.
+      const later = rows[pair.index];
+      const original = rows[pair.originalIndex];
+      found.set(later.id, {
+        categoryKey: original.categoryKey,
+        hint: {
+          description: original.description,
+          date: requireIsoDate(original.date),
+          amount: formatCents(original.amountCents),
+          categoryLabel: label(original.categoryKey),
+        },
+      });
+      found.set(original.id, {
+        categoryKey: later.categoryKey,
+        hint: {
+          description: later.description,
+          date: requireIsoDate(later.date),
+          amount: formatCents(later.amountCents),
+          categoryLabel: label(later.categoryKey),
+        },
+      });
+    }
+  }
+
+  return found;
 }

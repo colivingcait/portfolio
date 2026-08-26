@@ -333,7 +333,17 @@ function RoomTable({ property, months }: { property: BreakdownProperty; months: 
           <tbody>
             {rooms.map((room) => (
               <tr key={room.roomNumber} className="hover:bg-surface-2/50">
-                <td className="px-2 py-1.5 text-[12px]">Room {room.roomNumber}</td>
+                <td className="px-2 py-1.5 text-[12px]">
+                  Room {room.roomNumber}
+                  {room.people === 0 && room.medianCents === null ? (
+                    <span
+                      className="ml-2 text-[10px] text-bad"
+                      title="No dues have ever stuck to this room — either none were billed, or every booking was reversed."
+                    >
+                      never let
+                    </span>
+                  ) : null}
+                </td>
                 <td className="px-2 py-1.5 text-right">
                   <span
                     className={`num text-[12px] ${room.people >= 4 ? 'text-bad' : room.people >= 3 ? 'text-warn' : 'text-muted'}`}

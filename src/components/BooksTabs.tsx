@@ -8,9 +8,13 @@ const TABS = [
   { href: '/books/pnl', label: 'Profit & loss' },
   { href: '/books/balance-sheet', label: 'Balance sheet' },
   { href: '/reports', label: 'Year end' },
-  { href: '/review', label: 'Review' },
 ];
 
+/**
+ * Review is not here any more. It was the same rows as Transactions with a
+ * different filter, and a tab for it meant a bank line appeared to move house
+ * the moment it was categorized.
+ */
 export function BooksTabs() {
   const pathname = usePathname();
   return (

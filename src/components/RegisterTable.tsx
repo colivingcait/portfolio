@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { RegisterRow } from './RegisterRow';
+import { ReviewRow } from './ReviewRow';
 import { recategorizeMany } from '@/lib/books-actions';
 import { Th } from './ui';
 import type { RegisterRow as Row } from '@/lib/books-queries';
@@ -89,15 +90,45 @@ export function RegisterTable({ rows, categories }: Props) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              <RegisterRow
-                key={row.id}
-                categories={categories}
-                {...row}
-                selected={selected.has(row.id)}
-                onToggle={toggle}
-              />
-            ))}
+            {rows.map((row) =>
+              /*
+                An uncategorized row gets the tools for filing it — the payee
+                fragment a rule would match on, how many other rows that catches,
+                and whether to remember it. A filed one gets the tools for
+                revising it. Same table, same data; the row shows what the row
+                is for. They used to be two pages, and telling them apart meant
+                knowing which of two screens a bank line was currently on.
+              */
+              row.categoryKey === null && !row.isSplit ? (
+                <ReviewRow
+                  key={row.id}
+                  leading={
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${row.description}`}
+                      checked={selected.has(row.id)}
+                      onChange={(e) => toggle(row.id, e.target.checked)}
+                    />
+                  }
+                  categories={categories}
+                  id={row.id}
+                  date={row.date}
+                  propertyName={row.propertyName}
+                  description={row.description}
+                  amountCents={row.amountCents}
+                  suggestion={row.suggestion ?? 'maintenance_repairs'}
+                  reversalOf={row.reversalOf}
+                />
+              ) : (
+                <RegisterRow
+                  key={row.id}
+                  categories={categories}
+                  {...row}
+                  selected={selected.has(row.id)}
+                  onToggle={toggle}
+                />
+              ),
+            )}
           </tbody>
         </table>
       </div>

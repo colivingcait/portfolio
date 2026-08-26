@@ -6,6 +6,11 @@ import { confirmTransaction, suggestRule, type RuleScope, type RuleSuggestion } 
 import { formatCents } from '@/lib/engine/money';
 
 interface Props {
+  /**
+   * The first cell, so this row lines up with the register's other rows. The
+   * register supplies its bulk-select checkbox; nothing else needs it.
+   */
+  leading?: React.ReactNode;
   categories: { key: string; label: string }[];
   id: string;
   date: string;
@@ -24,6 +29,7 @@ interface Props {
 }
 
 export function ReviewRow({
+  leading = null,
   categories,
   id,
   date,
@@ -84,6 +90,7 @@ export function ReviewRow({
 
   return (
     <tr className="align-top hover:bg-surface-2/40">
+      <td className="border-b border-line/60 px-2 py-2">{leading}</td>
       <td className="border-b border-line/60 px-2 py-2 num">{date}</td>
       <td className="border-b border-line/60 px-2 py-2 text-[12px] text-muted">{propertyName}</td>
       <td className="border-b border-line/60 px-2 py-2">
@@ -159,20 +166,20 @@ export function ReviewRow({
         </select>
       </td>
       <td className="border-b border-line/60 px-2 py-2">
-        <label className="flex items-center gap-1.5 text-[11px] text-muted">
-          <input type="checkbox" checked={createRule} onChange={(e) => setCreateRule(e.target.checked)} />
-          Remember
-        </label>
-      </td>
-      <td className="border-b border-line/60 px-2 py-2">
-        <button
-          type="button"
-          onClick={confirm}
-          disabled={pending}
-          className="rounded border border-line px-2 py-1 text-[12px] hover:border-accent disabled:opacity-40"
-        >
-          {pending ? '…' : 'Confirm'}
-        </button>
+        <span className="flex items-center gap-3">
+          <label className="flex items-center gap-1.5 text-[11px] text-muted">
+            <input type="checkbox" checked={createRule} onChange={(e) => setCreateRule(e.target.checked)} />
+            Remember
+          </label>
+          <button
+            type="button"
+            onClick={confirm}
+            disabled={pending}
+            className="rounded border border-line px-2 py-1 text-[12px] hover:border-accent disabled:opacity-40"
+          >
+            {pending ? '…' : 'Confirm'}
+          </button>
+        </span>
       </td>
     </tr>
   );

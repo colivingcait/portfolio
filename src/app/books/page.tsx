@@ -53,17 +53,26 @@ export default async function BooksPage({
 
   return (
     <>
-      <PageHeader title="Books" subtitle="Every line the bank has, and what it was called." />
+      <PageHeader
+        title="Books"
+        subtitle={
+          data.uncategorized > 0
+            ? `Every line the bank has, and what it was called. ${data.uncategorized} still to file.`
+            : 'Every line the bank has, and what it was called. Everything is filed.'
+        }
+      />
       <BooksTabs />
 
       <Explainer title="What this is">
-        The register — one row per bank line, across every property and account. Categorizing happens once in{' '}
-        <Link href="/review" className="underline">Review</Link>; revising happens forever, and this is where. A repair
-        that turns out to be a capital improvement, a charge that belongs to the other house, a payment that needs a
-        note before you forget what it was for.
+        The register — one row per bank line, across every property and account, whatever state it is in. A row with no
+        category yet carries the tools for filing it: the fragment of the payee a rule should match on, how many other
+        rows that would catch, and whether to remember it. A row already filed carries the tools for revising it —
+        change the category, split it across two, leave a note.
         <div className="mt-1.5">
-          Change a category here and the month&apos;s rollups rebuild immediately, so the P&amp;L, the Schedule E and
-          the returns all move with it. Nothing is left showing the old answer.
+          Change anything here and the month&apos;s rollups rebuild immediately, so the P&amp;L, the Schedule E and the
+          returns all move with it. Nothing is left showing the old answer. An <strong>uncategorized</strong> row is
+          money that moved and has not been accounted for, so a profit and loss with rows still unfiled is incomplete —
+          and it will look finished either way, which is exactly the danger.
         </div>
       </Explainer>
 

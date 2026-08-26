@@ -429,6 +429,37 @@ export async function getOperations(
     })
     .sort((a, b) => a.propertyName.localeCompare(b.propertyName) || Number(a.roomNumber) - Number(b.roomNumber));
 
+  // A room that has never earned anything does not appear in the export at all,
+  // so building the list from the export alone hid it — and a permanently empty
+  // room is the one you most need to see. Glen Mora is configured for eight and
+  // the export has only ever carried seven; room 2 has never been let, and the
+  // page showed seven cards as though the house had seven rooms.
+  //
+  // Occupancy was never wrong: it divides by the configured room count, so the
+  // empty room has always counted against it. Only the list was short.
+  for (const property of properties) {
+    if (!property.roomCount) continue;
+    const own = rooms.filter((room) => room.propertyId === property.id);
+    if (own.length >= property.roomCount) continue;
+
+    const seen = new Set(own.map((room) => room.roomNumber));
+    for (let number = 1; number <= property.roomCount && seen.size < property.roomCount; number += 1) {
+      const label = String(number);
+      if (seen.has(label)) continue;
+      seen.add(label);
+      rooms.push({
+        propertyId: property.id,
+        propertyName: property.name,
+        roomNumber: label,
+        byMonth: months.map(() => null),
+        medianCents: null,
+        people: 0,
+      });
+    }
+  }
+
+  rooms.sort((a, b) => a.propertyName.localeCompare(b.propertyName) || Number(a.roomNumber) - Number(b.roomNumber));
+
   // Money owed by someone who has left is a write-off in all but name: people
   // almost never pay after they move out. Splitting it out is the difference
   // between a receivable and a number that only looks like one.
