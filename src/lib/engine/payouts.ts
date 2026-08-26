@@ -363,6 +363,23 @@ export interface LoanObligation {
   balanceCents: Cents;
   maturityDate: IsoDate;
   daysToMaturity: number;
+  /** Interest the note charges over its whole term. */
+  totalTermInterestCents: Cents;
+  /** Interest paid so far. Not every dollar paid — see totalPaidCents. */
+  interestPaidCents: Cents;
+  /**
+   * Every dollar paid, interest and principal and escrow alike.
+   *
+   * Kept beside the interest figure rather than instead of it: on an
+   * interest-only note the two are the same, but a mortgage payment carries
+   * principal and escrow too, and subtracting that from interest owed would
+   * give a remaining balance that is simply wrong.
+   */
+  totalPaidCents: Cents;
+  /** What one scheduled payment comes to, escrow included. */
+  periodPaymentCents: Cents;
+  /** monthly | quarterly | semiannual | annual — so a figure is not misread. */
+  paymentFrequency: string;
   /**
    * Your effective share of the property, for the pro-rata view.
    *
@@ -416,6 +433,11 @@ export function obligationsIn(
     balanceCents: Cents;
     maturityDate: IsoDate;
     daysToMaturity: number;
+    totalTermInterestCents: Cents;
+    interestPaidCents: Cents;
+    totalPaidCents: Cents;
+    periodPaymentCents: Cents;
+    paymentFrequency: string;
     sharePercent: number;
     guaranteed: boolean;
   }[],
@@ -447,6 +469,11 @@ export function obligationsIn(
         balanceCents: loan.balanceCents,
         maturityDate: loan.maturityDate,
         daysToMaturity: loan.daysToMaturity,
+        totalTermInterestCents: loan.totalTermInterestCents,
+        interestPaidCents: loan.interestPaidCents,
+        totalPaidCents: loan.totalPaidCents,
+        periodPaymentCents: loan.periodPaymentCents,
+        paymentFrequency: loan.paymentFrequency,
         sharePercent: loan.sharePercent,
         guaranteed: loan.guaranteed,
         nextDueDate: inHorizon.find((row) => !settled(row))?.dueDate ?? inHorizon[0]?.dueDate ?? null,

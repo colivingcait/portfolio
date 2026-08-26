@@ -38,6 +38,11 @@ export async function getDebtObligations(
       const records = loan.payments.map(toLoanPayment);
       const year = interestYear(terms, records, Number(month.slice(0, 4)));
       const summary = interestSummary(terms, records, asOf);
+      const schedule = buildSchedule(terms, records);
+      // Any scheduled row will do for the period payment: it is the terms'
+      // figure, and an actual payment that differed is a fact about one month
+      // rather than about the note.
+      const scheduled = schedule.find((row) => !row.actual) ?? schedule[0];
 
       return {
         loanId: loan.id,
@@ -53,8 +58,13 @@ export async function getDebtObligations(
         daysToMaturity: daysToMaturity(terms, asOf),
         sharePercent: ownership.shares.get(loan.propertyId) ?? 0,
         guaranteed: loan.personallyGuaranteed,
-        schedule: buildSchedule(terms, records),
+        schedule,
         actualPaymentDates: loan.payments.filter((p) => p.source === 'actual').map((p) => p.date.toISOString().slice(0, 10)),
+        totalTermInterestCents: summary.totalTermCents,
+        interestPaidCents: summary.paidCents,
+        totalPaidCents: loan.payments.reduce((total, p) => total + p.totalCents, 0),
+        periodPaymentCents: scheduled ? scheduled.paymentCents + scheduled.escrowCents : 0,
+        paymentFrequency: loan.paymentFrequency,
         stillOwedThisYearCents: year.stillOwedCents,
         stillOwedToMaturityCents: summary.arrearsCents + summary.remainingToMaturityCents,
       };

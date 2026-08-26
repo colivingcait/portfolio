@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db';
 import { getMaturityLadder, getSelectOptions, todayIso, currentMonth } from '@/lib/queries';
 import { getDebtObligations } from '@/lib/debt-queries';
 import { DebtFilters } from '@/components/DebtFilters';
-import { DEBT_HORIZONS, DEBT_KINDS, DEBT_VIEWS, viewedCents, type DebtHorizon, type DebtKind, type DebtView } from '@/lib/engine/payouts';
+import { DEBT_KINDS, DEBT_VIEWS, viewedCents, type DebtKind, type DebtView } from '@/lib/engine/payouts';
 import { Badge, Empty, Explainer, Money, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
 import { AddPanel } from '@/components/AddPanel';
 import { RecordForm } from '@/components/RecordForm';
@@ -13,22 +13,27 @@ import { formatCents } from '@/lib/engine/money';
 
 export const dynamic = 'force-dynamic';
 
-function maturityTone(days: number) {
-  if (days < 0) return 'bad' as const;
-  if (days <= 90) return 'bad' as const;
-  if (days <= 365) return 'warn' as const;
-  return 'muted' as const;
+/**
+ * Colour on the days rather than a badge beside the date.
+ *
+ * A badge crammed next to a date made the cell the widest thing in the row and
+ * the hardest to read. The urgency belongs to the countdown, so that is what
+ * carries it.
+ */
+function maturityText(days: number) {
+  if (days <= 90) return 'text-bad';
+  if (days <= 365) return 'text-warn';
+  return 'text-muted';
 }
 
 export default async function DebtPage({
   searchParams,
 }: {
-  searchParams: Promise<{ horizon?: string; kind?: string; view?: string }>;
+  searchParams: Promise<{ kind?: string; view?: string }>;
 }) {
   const params = await searchParams;
   const asOf = todayIso();
   const month = currentMonth();
-  const horizon = (DEBT_HORIZONS.some((h) => h.key === params.horizon) ? params.horizon : 'year') as DebtHorizon;
   const kind = (DEBT_KINDS.some((k) => k.key === params.kind) ? params.kind : 'pml') as DebtKind;
   // Whole by default: the company owes what it owes, undivided.
   const view = (DEBT_VIEWS.some((v) => v.key === params.view) ? params.view : 'whole') as DebtView;
@@ -37,12 +42,12 @@ export default async function DebtPage({
     getMaturityLadder(asOf),
     prisma.loan.findMany({ include: { property: true }, orderBy: { maturityDate: 'asc' } }),
     getSelectOptions(),
-    getDebtObligations(month, horizon, kind),
+    // A fixed window: no column depends on a span any more, and the interest
+    // figures come from the ledger regardless of it.
+    getDebtObligations(month, 'year', kind),
   ]);
 
-  const horizonLabel = DEBT_HORIZONS.find((h) => h.key === horizon)!.label.toLowerCase();
   const kindLabel = DEBT_KINDS.find((k) => k.key === kind)!.label.toLowerCase();
-  const showEscrow = obligations.some((row) => row.escrowCents !== 0);
   const scale = (cents: number, row: (typeof obligations)[number]) => viewedCents(cents, view, row);
   const total = (pick: (row: (typeof obligations)[number]) => number) =>
     obligations.reduce((sum, row) => sum + scale(pick(row), row), 0);
@@ -68,12 +73,12 @@ export default async function DebtPage({
       />
 
       <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Monthly debt service" value={formatCents(data.monthlyDebtServiceCents)} />
-        <Stat label="Balance" value={formatCents(data.totalBalanceCents)} hint="Principal outstanding, whole." />
+        <Stat label="Monthly debt service" value={formatCents(total((r) => r.periodPaymentCents))} hint={`Across the ${obligations.length} ${kindLabel} shown.`} />
+        <Stat label="Borrowed" value={formatCents(total((r) => r.borrowedCents))} hint="Original principal." />
         <Stat
-          label="Still owed"
-          value={formatCents(total((r) => r.balanceCents + r.stillOwedToMaturityCents))}
-          hint={`Principal and interest to maturity, ${kindLabel}.`}
+          label="Remaining interest"
+          value={formatCents(total((r) => r.stillOwedToMaturityCents))}
+          hint="Still to pay between now and maturity."
         />
         <Stat
           label="Guaranteed exposure"
@@ -95,9 +100,9 @@ export default async function DebtPage({
 
       <Panel
         title="Notes"
-        description={`What each lender lent, what has been paid back, and what is still owed. "Still owed" is principal outstanding plus the interest left to run — the whole obligation, not this month's slice of it.`}
+        description="Interest owed is what the note charges over its whole term. Paid so far is the interest settled against it, by monthly payment or by lump. Remaining balance is the difference — what is still to pay between now and maturity."
       >
-        <DebtFilters horizon={horizon} kind={kind} view={view} />
+        <DebtFilters kind={kind} view={view} />
 
         {guaranteedShown ? (
           <Note>
@@ -120,10 +125,11 @@ export default async function DebtPage({
                   <Th>Lender</Th>
                   <Th right>Rate</Th>
                   <Th right>Borrowed</Th>
-                  <Th right>Paid so far</Th>
-                  <Th right>Still owed</Th>
-                  <Th right>Due {horizonLabel}</Th>
                   <Th>Matures</Th>
+                  <Th right>Interest owed</Th>
+                  <Th right>Paid so far</Th>
+                  <Th right>Remaining balance</Th>
+                  <Th right>Monthly</Th>
                   <Th />
                 </tr>
               </thead>
@@ -142,33 +148,35 @@ export default async function DebtPage({
                       <span className="num text-[12px] text-muted">{row.ratePercent}%</span>
                     </Td>
                     <Td right><Money cents={scale(row.borrowedCents, row)} /></Td>
-                    <Td right>
-                      {row.paidToDateCents ? <Money cents={scale(row.paidToDateCents, row)} /> : <span className="num text-muted">—</span>}
-                    </Td>
-                    <Td right>
-                      <Money cents={scale(row.balanceCents + row.stillOwedToMaturityCents, row)} />
-                      <span className="mt-0.5 block text-[10px] text-muted">
-                        {formatCents(scale(row.balanceCents, row))} principal + {formatCents(scale(row.stillOwedToMaturityCents, row))} interest
-                      </span>
-                    </Td>
-                    <Td right>
-                      {row.periods === 0 ? (
-                        <span className="num text-muted">—</span>
-                      ) : (
-                        <>
-                          <Money cents={scale(row.totalCents, row)} />
-                          <span className="mt-0.5 block text-[10px] text-muted">
-                            {row.periods} payment{row.periods === 1 ? '' : 's'}
-                            {showEscrow && row.escrowCents ? `, incl. ${formatCents(row.escrowCents)} escrow` : ''}
-                          </span>
-                        </>
-                      )}
-                    </Td>
                     <Td>
                       <span className="num text-[12px]">{row.maturityDate}</span>
-                      <Badge tone={maturityTone(row.daysToMaturity)}>
-                        {row.daysToMaturity < 0 ? 'matured' : `${row.daysToMaturity}d`}
-                      </Badge>
+                      <span className={`mt-0.5 block text-[10px] ${maturityText(row.daysToMaturity)}`}>
+                        {row.daysToMaturity < 0
+                          ? `matured ${Math.abs(row.daysToMaturity)} days ago`
+                          : `${row.daysToMaturity.toLocaleString()} days`}
+                      </span>
+                    </Td>
+                    <Td right><Money cents={scale(row.totalTermInterestCents, row)} /></Td>
+                    <Td right>
+                      {row.interestPaidCents ? (
+                        <Money cents={scale(row.interestPaidCents, row)} />
+                      ) : (
+                        <span className="num text-muted">—</span>
+                      )}
+                      {row.totalPaidCents !== row.interestPaidCents ? (
+                        <span className="mt-0.5 block text-[10px] text-muted">
+                          of {formatCents(scale(row.totalPaidCents, row))} paid in total
+                        </span>
+                      ) : null}
+                    </Td>
+                    <Td right>
+                      <Money cents={scale(row.stillOwedToMaturityCents, row)} />
+                    </Td>
+                    <Td right>
+                      <Money cents={scale(row.periodPaymentCents, row)} />
+                      {row.paymentFrequency !== 'monthly' ? (
+                        <span className="mt-0.5 block text-[10px] text-warn">{row.paymentFrequency}</span>
+                      ) : null}
                     </Td>
                     <Td>
                       <Link href={`/debt/${row.loanId}`} className="text-[12px] text-muted hover:text-text">
@@ -182,14 +190,11 @@ export default async function DebtPage({
                   <Td />
                   <Td />
                   <Td right><strong><Money cents={total((r) => r.borrowedCents)} /></strong></Td>
-                  <Td right><strong><Money cents={total((r) => r.paidToDateCents)} /></strong></Td>
-                  <Td right>
-                    <strong>
-                      <Money cents={total((r) => r.balanceCents + r.stillOwedToMaturityCents)} />
-                    </strong>
-                  </Td>
-                  <Td right><strong><Money cents={total((r) => r.totalCents)} /></strong></Td>
                   <Td />
+                  <Td right><strong><Money cents={total((r) => r.totalTermInterestCents)} /></strong></Td>
+                  <Td right><strong><Money cents={total((r) => r.interestPaidCents)} /></strong></Td>
+                  <Td right><strong><Money cents={total((r) => r.stillOwedToMaturityCents)} /></strong></Td>
+                  <Td right><strong><Money cents={total((r) => r.periodPaymentCents)} /></strong></Td>
                   <Td />
                 </tr>
               </tbody>

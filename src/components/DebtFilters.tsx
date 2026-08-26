@@ -1,16 +1,18 @@
 'use client';
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { DEBT_HORIZONS, DEBT_KINDS, DEBT_VIEWS, type DebtHorizon, type DebtKind, type DebtView } from '@/lib/engine/payouts';
+import { DEBT_KINDS, DEBT_VIEWS, type DebtKind, type DebtView } from '@/lib/engine/payouts';
 
 /**
- * How far ahead, and which lenders.
+ * Which lenders, and whose debt.
  *
- * Two separate questions and so two separate rows of buttons rather than one
- * combined menu: the span you are planning over has nothing to do with who you
- * owe, and pairing them would make nine options out of two choices.
+ * Two separate questions and so two separate groups rather than one combined
+ * menu. There used to be a third — how far ahead to look — and it is what made
+ * the table wrong: it produced a figure for what a span CHARGES sitting beside
+ * one for what is still OWED, and the two were read as the same thing. Every
+ * column now answers the second question, so nothing needs a span.
  */
-export function DebtFilters({ horizon, kind, view }: { horizon: DebtHorizon; kind: DebtKind; view: DebtView }) {
+export function DebtFilters({ kind, view }: { kind: DebtKind; view: DebtView }) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -59,23 +61,6 @@ export function DebtFilters({ horizon, kind, view }: { horizon: DebtHorizon; kin
         ))}
       </span>
 
-      <span className="flex items-center gap-1">
-        <span className="mr-1 text-[11px] text-muted">Showing</span>
-        {DEBT_HORIZONS.map((option) => (
-          <button
-            key={option.key}
-            type="button"
-            title={option.hint}
-            aria-pressed={option.key === horizon}
-            onClick={() => go({ horizon: option.key })}
-            className={`rounded px-2 py-0.5 text-[11px] transition-colors ${
-              option.key === horizon ? 'bg-surface-2 text-text' : 'text-muted hover:text-text'
-            }`}
-          >
-            {option.label}
-          </button>
-        ))}
-      </span>
     </div>
   );
 }
