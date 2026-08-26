@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db';
 import { getMaturityLadder, getSelectOptions, todayIso, currentMonth } from '@/lib/queries';
 import { getDebtObligations } from '@/lib/debt-queries';
 import { DebtFilters } from '@/components/DebtFilters';
-import { DEBT_HORIZONS, DEBT_KINDS, DEBT_VIEWS, type DebtHorizon, type DebtKind, type DebtView } from '@/lib/engine/payouts';
+import { DEBT_HORIZONS, DEBT_KINDS, DEBT_VIEWS, viewedCents, type DebtHorizon, type DebtKind, type DebtView } from '@/lib/engine/payouts';
 import { Badge, Empty, Explainer, Money, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
 import { AddPanel } from '@/components/AddPanel';
 import { RecordForm } from '@/components/RecordForm';
@@ -43,10 +43,7 @@ export default async function DebtPage({
   const horizonLabel = DEBT_HORIZONS.find((h) => h.key === horizon)!.label.toLowerCase();
   const kindLabel = DEBT_KINDS.find((k) => k.key === kind)!.label.toLowerCase();
   const showEscrow = obligations.some((row) => row.escrowCents !== 0);
-  // A guarantee does not pro-rate: a lender comes after the whole balance
-  // regardless of the interest held, so a guaranteed note is never scaled down.
-  const scale = (cents: number, row: (typeof obligations)[number]) =>
-    view === 'prorata' && !row.guaranteed ? Math.round((cents * row.sharePercent) / 100) : cents;
+  const scale = (cents: number, row: (typeof obligations)[number]) => viewedCents(cents, view, row);
   const total = (pick: (row: (typeof obligations)[number]) => number) =>
     obligations.reduce((sum, row) => sum + scale(pick(row), row), 0);
   const guaranteedShown = view === 'prorata' && obligations.some((row) => row.guaranteed);

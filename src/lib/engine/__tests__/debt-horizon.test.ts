@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { horizonBounds, matchesKind, obligationsIn } from '../payouts';
+import { horizonBounds, matchesKind, obligationsIn, viewedCents } from '../payouts';
 import { cents } from '../money';
 
 const row = (dueDate: string, interest: number, principal = 0, escrow = 0, actual = false) => ({
@@ -27,6 +27,8 @@ const NOTE = {
   balanceCents: cents(80_000),
   maturityDate: '2028-11-01',
   daysToMaturity: 800,
+  sharePercent: 50,
+  guaranteed: false,
 };
 
 const MORTGAGE = {
@@ -42,6 +44,8 @@ const MORTGAGE = {
   balanceCents: cents(240_000),
   maturityDate: '2028-11-01',
   daysToMaturity: 800,
+  sharePercent: 50,
+  guaranteed: false,
 };
 
 const QUARTERLY = {
@@ -57,6 +61,8 @@ const QUARTERLY = {
   balanceCents: cents(12_000),
   maturityDate: '2028-11-01',
   daysToMaturity: 800,
+  sharePercent: 50,
+  guaranteed: false,
 };
 
 describe('how far ahead the debt table looks', () => {
@@ -138,5 +144,26 @@ describe('how far ahead the debt table looks', () => {
     // From August all three fall on the first, so the tie-break decides alone.
     const fromAugust = obligationsIn('maturity', '2026-08', 'all', [MORTGAGE, NOTE, QUARTERLY]);
     expect(fromAugust.map((r) => r.lender)).toEqual(["Kathia's Mom", 'Laura Beeson', 'Shellpoint']);
+  });
+});
+
+describe('whose debt is being shown', () => {
+  const half = { sharePercent: 50, guaranteed: false };
+  const guaranteed = { sharePercent: 50, guaranteed: true };
+
+  it('shows the whole obligation by default, because the company owes it whole', () => {
+    expect(viewedCents(cents(80_000), 'whole', half)).toBe(cents(80_000));
+    expect(viewedCents(cents(80_000), 'whole', guaranteed)).toBe(cents(80_000));
+  });
+
+  it('scales to your share where you have only a share', () => {
+    expect(viewedCents(cents(80_000), 'prorata', half)).toBe(cents(40_000));
+    expect(viewedCents(cents(80_000), 'prorata', { sharePercent: 0, guaranteed: false })).toBe(0);
+  });
+
+  it('never scales a note you have personally guaranteed', () => {
+    // The whole point: a lender comes after the lot regardless of the share,
+    // so this is the one figure that must not shrink when the view does.
+    expect(viewedCents(cents(180_000), 'prorata', guaranteed)).toBe(cents(180_000));
   });
 });

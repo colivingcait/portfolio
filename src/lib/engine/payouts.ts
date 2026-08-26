@@ -284,6 +284,24 @@ export const DEBT_VIEWS: { key: DebtView; label: string; hint: string }[] = [
   { key: 'prorata', label: 'My share', hint: 'Scaled by your effective share. An economic figure, not a legal one.' },
 ];
 
+/**
+ * An amount as this view should show it.
+ *
+ * A personally guaranteed note is never scaled down, even under "my share".
+ * A lender comes after the whole balance regardless of the interest held, so
+ * shrinking it would understate the single exposure that matters most. Lives
+ * here rather than in the page that renders it, because a rule with a
+ * consequence like that must have exactly one implementation.
+ */
+export function viewedCents(
+  cents: Cents,
+  view: DebtView,
+  loan: { sharePercent: number; guaranteed: boolean },
+): Cents {
+  if (view === 'whole' || loan.guaranteed) return cents;
+  return roundCents((cents * loan.sharePercent) / 100);
+}
+
 /** Which loans to look at. Mortgages are on autopay; private notes are not. */
 export type DebtKind = 'pml' | 'mortgage' | 'all';
 
