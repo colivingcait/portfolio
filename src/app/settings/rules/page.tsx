@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { AddPanel } from '@/components/AddPanel';
 import { getSelectOptions } from '@/lib/queries';
 import { RecordForm } from '@/components/RecordForm';
 import { RowActions } from '@/components/RowActions';
@@ -70,10 +71,6 @@ export default async function RulesPage() {
         </Note>
       ) : null}
 
-      <Panel title="Add a rule">
-        <RecordForm modelKey="payeeRule" fields={fields} />
-      </Panel>
-
       <Panel
         title={`${rules.length} rules`}
         description="Catches counts the imported lines each rule's text appears in. A zero means the rule does nothing."
@@ -138,6 +135,11 @@ export default async function RulesPage() {
         month&apos;s statement. That is why a suggested rule is the vendor name alone and never the whole line: the
         dates, trace numbers and reference codes around it change every time.
       </Note>
+      <AddPanel label="Add a rule" description="Rules are also written for you when you confirm a row in Review.">
+        <RecordForm modelKey="payeeRule" fields={fields} />
+      
+      </AddPanel>
+
     </>
   );
 }

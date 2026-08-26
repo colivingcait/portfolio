@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { AddPanel } from '@/components/AddPanel';
 import { prisma } from '@/lib/db';
 import { getOwnershipContext, getSelectOptions, todayIso } from '@/lib/queries';
 import { RowActions } from '@/components/RowActions';
@@ -58,13 +59,6 @@ export default async function OwnershipPage() {
           <Link href="/owners/entities" className="underline">Entities</Link>.
         </Note>
       ) : null}
-
-      <Panel
-        title="Add owners"
-        description="Enter a whole split at once — every partner in one property, or everyone who holds the LLC. The running total flags a stack that misses 100% before it is saved rather than after."
-      >
-        <OwnershipSplitForm entities={options.entities} properties={options.properties} />
-      </Panel>
 
       {context.viewerId && properties.length > 0 ? (
         <Panel title={`Your effective share as of ${asOf}`}>
@@ -170,6 +164,10 @@ export default async function OwnershipPage() {
           );
         })
       )}
+      <AddPanel label="Add owners" description="Enter a whole split at once — every partner in one property, or everyone who holds the LLC. The running total flags a stack that misses 100% before it is saved rather than after.">
+        <OwnershipSplitForm entities={options.entities} properties={options.properties} />
+      </AddPanel>
+
     </>
   );
 }

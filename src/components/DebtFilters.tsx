@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { DEBT_HORIZONS, DEBT_KINDS, type DebtHorizon, type DebtKind } from '@/lib/engine/payouts';
+import { DEBT_HORIZONS, DEBT_KINDS, DEBT_VIEWS, type DebtHorizon, type DebtKind, type DebtView } from '@/lib/engine/payouts';
 
 /**
  * How far ahead, and which lenders.
@@ -10,7 +10,7 @@ import { DEBT_HORIZONS, DEBT_KINDS, type DebtHorizon, type DebtKind } from '@/li
  * combined menu: the span you are planning over has nothing to do with who you
  * owe, and pairing them would make nine options out of two choices.
  */
-export function DebtFilters({ horizon, kind }: { horizon: DebtHorizon; kind: DebtKind }) {
+export function DebtFilters({ horizon, kind, view }: { horizon: DebtHorizon; kind: DebtKind; view: DebtView }) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -34,6 +34,24 @@ export function DebtFilters({ horizon, kind }: { horizon: DebtHorizon; kind: Deb
             onClick={() => go({ kind: option.key })}
             className={`rounded px-2 py-1 text-[12px] transition-colors ${
               option.key === kind ? 'bg-text text-surface' : 'text-muted hover:bg-surface-2 hover:text-text'
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </span>
+
+      <span className="flex items-center gap-1">
+        <span className="mr-1 text-[11px] text-muted">Owed</span>
+        {DEBT_VIEWS.map((option) => (
+          <button
+            key={option.key}
+            type="button"
+            title={option.hint}
+            aria-pressed={option.key === view}
+            onClick={() => go({ view: option.key })}
+            className={`rounded px-2 py-0.5 text-[11px] transition-colors ${
+              option.key === view ? 'bg-surface-2 text-text' : 'text-muted hover:text-text'
             }`}
           >
             {option.label}

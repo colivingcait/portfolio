@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { AddPanel } from '@/components/AddPanel';
 import { prisma } from '@/lib/db';
 import { getSelectOptions } from '@/lib/queries';
 import { RecordForm } from '@/components/RecordForm';
@@ -57,10 +58,6 @@ export default async function CapitalPage() {
           what the bank statements show leaving, so the two cannot drift apart unnoticed.
         </div>
       </Explainer>
-      <Panel title="Add an entry">
-        <RecordForm modelKey="capitalAccountEntry" fields={fields} />
-      </Panel>
-
       {balances.length > 0 ? (
         <Panel
           title="Balances"
@@ -143,6 +140,11 @@ export default async function CapitalPage() {
           </table>
         )}
       </Panel>
+      <AddPanel label="Add an entry" description="A contribution, a distribution, or capital handed back.">
+        <RecordForm modelKey="capitalAccountEntry" fields={fields} />
+      
+      </AddPanel>
+
     </>
   );
 }

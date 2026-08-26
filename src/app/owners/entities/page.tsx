@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { AddPanel } from '@/components/AddPanel';
 import { prisma } from '@/lib/db';
 import { MODELS } from '@/lib/models';
 import { RecordForm } from '@/components/RecordForm';
@@ -30,10 +31,6 @@ export default async function EntitiesPage() {
           from — without it the portfolio view can show what the houses did, but not what any of it is worth to you.
         </div>
       </Explainer>
-      <Panel title="Add an entity">
-        <RecordForm modelKey="entity" fields={MODELS.entity.fields} />
-      </Panel>
-
       <Panel title={`${entities.length} entities`}>
         {entities.length === 0 ? (
           <Empty>Start here: add yourself, then any LLC that holds title.</Empty>
@@ -68,6 +65,11 @@ export default async function EntitiesPage() {
           </table>
         )}
       </Panel>
+      <AddPanel label="Add an entity" description="A person or a legal entity — they are the same kind of node in the ownership graph.">
+        <RecordForm modelKey="entity" fields={MODELS.entity.fields} />
+      
+      </AddPanel>
+
     </>
   );
 }

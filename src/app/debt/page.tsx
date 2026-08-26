@@ -1,6 +1,9 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/db';
-import { getMaturityLadder, getSelectOptions, todayIso } from '@/lib/queries';
+import { getMaturityLadder, getSelectOptions, todayIso, currentMonth } from '@/lib/queries';
+import { getDebtObligations } from '@/lib/debt-queries';
+import { DebtFilters } from '@/components/DebtFilters';
+import { DEBT_HORIZONS, DEBT_KINDS, DEBT_VIEWS, type DebtHorizon, type DebtKind, type DebtView } from '@/lib/engine/payouts';
 import { Badge, Empty, Explainer, Money, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
 import { AddPanel } from '@/components/AddPanel';
 import { RecordForm } from '@/components/RecordForm';
@@ -17,18 +20,40 @@ function maturityTone(days: number) {
   return 'muted' as const;
 }
 
-export default async function DebtPage() {
+export default async function DebtPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ horizon?: string; kind?: string; view?: string }>;
+}) {
+  const params = await searchParams;
   const asOf = todayIso();
-  const [data, loans, options] = await Promise.all([
+  const month = currentMonth();
+  const horizon = (DEBT_HORIZONS.some((h) => h.key === params.horizon) ? params.horizon : 'year') as DebtHorizon;
+  const kind = (DEBT_KINDS.some((k) => k.key === params.kind) ? params.kind : 'pml') as DebtKind;
+  // Whole by default: the company owes what it owes, undivided.
+  const view = (DEBT_VIEWS.some((v) => v.key === params.view) ? params.view : 'whole') as DebtView;
+
+  const [data, loans, options, obligations] = await Promise.all([
     getMaturityLadder(asOf),
     prisma.loan.findMany({ include: { property: true }, orderBy: { maturityDate: 'asc' } }),
     getSelectOptions(),
+    getDebtObligations(month, horizon, kind),
   ]);
+
+  const horizonLabel = DEBT_HORIZONS.find((h) => h.key === horizon)!.label.toLowerCase();
+  const kindLabel = DEBT_KINDS.find((k) => k.key === kind)!.label.toLowerCase();
+  const showEscrow = obligations.some((row) => row.escrowCents !== 0);
+  // A guarantee does not pro-rate: a lender comes after the whole balance
+  // regardless of the interest held, so a guaranteed note is never scaled down.
+  const scale = (cents: number, row: (typeof obligations)[number]) =>
+    view === 'prorata' && !row.guaranteed ? Math.round((cents * row.sharePercent) / 100) : cents;
+  const total = (pick: (row: (typeof obligations)[number]) => number) =>
+    obligations.reduce((sum, row) => sum + scale(pick(row), row), 0);
+  const guaranteedShown = view === 'prorata' && obligations.some((row) => row.guaranteed);
 
   // The ladder covers active notes. A settled one still belongs on the screen
   // that owns loans, or retiring it would look like losing it.
   const settled = loans.filter((loan) => loan.status !== 'active');
-  const rateOf = new Map(loans.map((loan) => [loan.id, Number(loan.ratePercent)]));
 
   // The caveat is per note, not per portfolio: a single guaranteed note can
   // dwarf your share of it even when the totals happen to look reassuring.
@@ -47,11 +72,11 @@ export default async function DebtPage() {
 
       <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="Monthly debt service" value={formatCents(data.monthlyDebtServiceCents)} />
-        <Stat label="Balance (property level)" value={formatCents(data.totalBalanceCents)} />
+        <Stat label="Balance" value={formatCents(data.totalBalanceCents)} hint="Principal outstanding, whole." />
         <Stat
-          label="Your pro-rata share"
-          value={data.hasViewer ? formatCents(data.totalProRataCents) : '—'}
-          hint={data.hasViewer ? 'An economic figure.' : 'No entity is marked as you.'}
+          label="Still owed"
+          value={formatCents(total((r) => r.balanceCents + r.stillOwedToMaturityCents))}
+          hint={`Principal and interest to maturity, ${kindLabel}.`}
         />
         <Stat
           label="Guaranteed exposure"
@@ -61,13 +86,138 @@ export default async function DebtPage() {
         />
       </div>
 
-      {overGuaranteed.length > 0 ? (
+      {overGuaranteed.length > 0 && view === 'prorata' ? (
         <Note>
           On {overGuaranteed.length === 1 ? 'one note' : `${overGuaranteed.length} notes`} your guaranteed exposure
           exceeds your pro-rata share — by {formatCents(overGuaranteedBy)} in total. A pro-rata debt share is an
           economic figure, not a legal one: where you personally guarantee a note you are liable for the whole balance
           regardless of the interest you hold, and only one of those two numbers is what a lender will come after.
         </Note>
+      ) : null}
+
+
+      <Panel
+        title="Notes"
+        description={`What each lender lent, what has been paid back, and what is still owed. "Still owed" is principal outstanding plus the interest left to run — the whole obligation, not this month's slice of it.`}
+      >
+        <DebtFilters horizon={horizon} kind={kind} view={view} />
+
+        {guaranteedShown ? (
+          <Note>
+            Notes you have personally guaranteed are shown whole even here. A lender comes after the full balance
+            regardless of the share you hold, so scaling one down would understate exactly the exposure that matters.
+          </Note>
+        ) : null}
+
+        {obligations.length === 0 ? (
+          <Empty>
+            No {kindLabel} on the books. Add one below — this screen needs no import, no statement and no external
+            account.
+          </Empty>
+        ) : (
+          <div className="overflow-x-auto">
+            <table>
+              <thead>
+                <tr>
+                  <Th>Property</Th>
+                  <Th>Lender</Th>
+                  <Th right>Rate</Th>
+                  <Th right>Borrowed</Th>
+                  <Th right>Paid so far</Th>
+                  <Th right>Still owed</Th>
+                  <Th right>Due {horizonLabel}</Th>
+                  <Th>Matures</Th>
+                  <Th />
+                </tr>
+              </thead>
+              <tbody>
+                {obligations.map((row) => (
+                  <tr key={row.loanId} className="hover:bg-surface-2/50">
+                    <Td>{row.propertyName}</Td>
+                    <Td>
+                      <Link href={`/debt/${row.loanId}`} className="hover:text-accent">
+                        {row.lender}
+                      </Link>
+                      {row.loanType === 'pml' ? <Badge tone="accent">PML</Badge> : null}
+                      {view === 'prorata' && row.guaranteed ? <Badge tone="bad">guaranteed</Badge> : null}
+                    </Td>
+                    <Td right>
+                      <span className="num text-[12px] text-muted">{row.ratePercent}%</span>
+                    </Td>
+                    <Td right><Money cents={scale(row.borrowedCents, row)} /></Td>
+                    <Td right>
+                      {row.paidToDateCents ? <Money cents={scale(row.paidToDateCents, row)} /> : <span className="num text-muted">—</span>}
+                    </Td>
+                    <Td right>
+                      <Money cents={scale(row.balanceCents + row.stillOwedToMaturityCents, row)} />
+                      <span className="mt-0.5 block text-[10px] text-muted">
+                        {formatCents(scale(row.balanceCents, row))} principal + {formatCents(scale(row.stillOwedToMaturityCents, row))} interest
+                      </span>
+                    </Td>
+                    <Td right>
+                      {row.periods === 0 ? (
+                        <span className="num text-muted">—</span>
+                      ) : (
+                        <>
+                          <Money cents={scale(row.totalCents, row)} />
+                          <span className="mt-0.5 block text-[10px] text-muted">
+                            {row.periods} payment{row.periods === 1 ? '' : 's'}
+                            {showEscrow && row.escrowCents ? `, incl. ${formatCents(row.escrowCents)} escrow` : ''}
+                          </span>
+                        </>
+                      )}
+                    </Td>
+                    <Td>
+                      <span className="num text-[12px]">{row.maturityDate}</span>
+                      <Badge tone={maturityTone(row.daysToMaturity)}>
+                        {row.daysToMaturity < 0 ? 'matured' : `${row.daysToMaturity}d`}
+                      </Badge>
+                    </Td>
+                    <Td>
+                      <Link href={`/debt/${row.loanId}`} className="text-[12px] text-muted hover:text-text">
+                        Open
+                      </Link>
+                    </Td>
+                  </tr>
+                ))}
+                <tr className="border-t border-line">
+                  <Td><strong>Total</strong></Td>
+                  <Td />
+                  <Td />
+                  <Td right><strong><Money cents={total((r) => r.borrowedCents)} /></strong></Td>
+                  <Td right><strong><Money cents={total((r) => r.paidToDateCents)} /></strong></Td>
+                  <Td right>
+                    <strong>
+                      <Money cents={total((r) => r.balanceCents + r.stillOwedToMaturityCents)} />
+                    </strong>
+                  </Td>
+                  <Td right><strong><Money cents={total((r) => r.totalCents)} /></strong></Td>
+                  <Td />
+                  <Td />
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
+
+      {settled.length > 0 ? (
+        <Panel title="Paid off" description="Notes that have been settled or refinanced. Kept, because retiring one should not look like losing it.">
+          <table>
+            <tbody>
+              {settled.map((loan) => (
+                <tr key={loan.id}>
+                  <Td>{loan.property.name}</Td>
+                  <Td>
+                    <Link href={`/debt/${loan.id}`} className="hover:text-accent">{loan.lender}</Link>
+                    <Badge tone="muted">{loan.status.replace(/_/g, ' ')}</Badge>
+                  </Td>
+                  <Td right><Money cents={loan.originalPrincipalCents} /></Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Panel>
       ) : null}
 
       <Explainer title="What this is and why it matters">
@@ -82,84 +232,6 @@ export default async function DebtPage() {
           the only way those two reach Schedule E at all, since they never appear as a bank line of their own.
         </div>
       </Explainer>
-
-      <Panel title="Maturity ladder">
-        {data.ladder.length === 0 ? (
-          <Empty>
-            No active loans yet. Add one below — this screen needs no import, no statement and no external account.
-          </Empty>
-        ) : (
-          <div className="overflow-x-auto">
-            <table>
-              <thead>
-                <tr>
-                  <Th>Property</Th>
-                  <Th>Lender</Th>
-                  <Th>Structure</Th>
-                  <Th right>Rate</Th>
-                  <Th>Maturity</Th>
-                  <Th right>Days</Th>
-                  <Th right>Balance</Th>
-                  <Th right>Balloon</Th>
-                  <Th right>Pro-rata</Th>
-                  <Th right>Guaranteed</Th>
-                  <Th />
-                </tr>
-              </thead>
-              <tbody>
-                {data.ladder.map((entry) => (
-                  <tr key={entry.loan.id} className="hover:bg-surface-2/50">
-                    <Td>{entry.loan.propertyName}</Td>
-                    <Td>
-                      {entry.loan.lender}
-                      <span className="ml-1.5 text-[11px] text-muted">{entry.loan.type}</span>
-                    </Td>
-                    <Td>
-                      <span className="text-[12px] text-muted">{entry.loan.structure.replace(/_/g, ' ')}</span>
-                    </Td>
-                    <Td right>
-                      <span className="num">{rateOf.get(entry.loan.id)?.toFixed(2) ?? '—'}%</span>
-                    </Td>
-                    <Td>
-                      <span className="num">{entry.maturityDate}</span>
-                    </Td>
-                    <Td right>
-                      <Badge tone={maturityTone(entry.daysRemaining)}>{entry.daysRemaining}</Badge>
-                    </Td>
-                    <Td right>
-                      <Money cents={entry.balanceCents} />
-                    </Td>
-                    <Td right>
-                      {entry.balloonCents > 0 ? <Money cents={entry.balloonCents} /> : <span className="num text-muted">—</span>}
-                    </Td>
-                    <Td right>
-                      <Money cents={entry.proRataBalanceCents} muted />
-                    </Td>
-                    <Td right>
-                      {entry.guaranteedExposureCents > 0 ? (
-                        <span className="num text-bad">{formatCents(entry.guaranteedExposureCents)}</span>
-                      ) : (
-                        <span className="num text-muted">—</span>
-                      )}
-                    </Td>
-                    <Td>
-                      <div className="flex items-center gap-3">
-                        <Link href={`/debt/${entry.loan.id}`} className="text-[12px] text-muted hover:text-accent">
-                          Schedule
-                        </Link>
-                        <Link href={`/debt/${entry.loan.id}/edit`} className="text-[12px] text-muted hover:text-accent">
-                          Edit
-                        </Link>
-                        <DeleteButton modelKey="loan" id={entry.loan.id} />
-                      </div>
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Panel>
 
       <AddPanel
         label="Add a loan"

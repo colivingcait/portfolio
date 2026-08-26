@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db';
+import { AddPanel } from '@/components/AddPanel';
 import { getCategoryCatalog } from '@/lib/categories-queries';
 import { CATEGORIES } from '@/lib/engine/categories';
 import { CategoryEditor } from '@/components/CategoryEditor';
@@ -54,13 +55,6 @@ export default async function CategoriesPage() {
           depreciated rather than deducted, and your accountant sets that up.
         </div>
       </Explainer>
-      <Panel
-        title="Add a category"
-        description="Name it the way you think about it. Where it lands on a tax return is chosen once, here, and never asked again while you are categorizing."
-      >
-        <CategoryEditor rows={rows} />
-      </Panel>
-
       <Note tone="muted">
         Adding one with the same name as a built-in replaces it — that is how a mapping you disagree with gets
         corrected. Hiding a category keeps it off the pickers without touching transactions already filed under it,
@@ -108,6 +102,10 @@ export default async function CategoriesPage() {
           </table>
         </Panel>
       ))}
+      <AddPanel label="Add a category" description="Name it the way you think about it. Where it lands on a tax return is chosen once, here, and never asked again while you are categorizing.">
+        <CategoryEditor rows={rows} />
+      </AddPanel>
+
     </>
   );
 }

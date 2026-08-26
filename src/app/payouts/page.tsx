@@ -7,25 +7,18 @@ import { DistributionRecorder } from '@/components/DistributionRecorder';
 import { LoanPaymentRecorder } from '@/components/LoanPaymentRecorder';
 import { addMonthsToMonth } from '@/lib/engine/dates';
 import { formatCents } from '@/lib/engine/money';
-import { DebtFilters } from '@/components/DebtFilters';
-import { DEBT_HORIZONS, DEBT_KINDS, type DebtHorizon, type DebtKind } from '@/lib/engine/payouts';
+
 
 export const dynamic = 'force-dynamic';
 
 export default async function PayoutsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string; horizon?: string; kind?: string }>;
+  searchParams: Promise<{ month?: string }>;
 }) {
   const params = await searchParams;
   const month = params.month ?? currentMonth();
-  const horizon = (DEBT_HORIZONS.some((h) => h.key === params.horizon) ? params.horizon : 'month') as DebtHorizon;
-  // Private notes lead: they are the ones paid by hand and worth a decision.
-  const kind = (DEBT_KINDS.some((k) => k.key === params.kind) ? params.kind : 'pml') as DebtKind;
-  const data = await getPayouts(month, horizon, kind);
-
-  const horizonLabel = DEBT_HORIZONS.find((h) => h.key === horizon)!.label.toLowerCase();
-  const kindLabel = DEBT_KINDS.find((k) => k.key === kind)!.label.toLowerCase();
+  const data = await getPayouts(month);
 
   const withOwners = data.properties.filter((p) => p.owners.length > 0);
   const unpaid = data.due.filter((d) => !d.paid);
@@ -53,134 +46,14 @@ export default async function PayoutsPage({
         <Stat label="Total out" value={formatCents(data.totals.totalCents)} />
       </div>
 
-      <Panel
-        title="Debt payments due"
-        description={`One row per loan. "Due" is what the schedule raises over the span chosen, before any payment; "still owed" is what is actually left on the note once arrears carried in and everything already paid are taken into account. The gap between them is what you have paid. Aim a lump sum with the second, and record it on the lender's own page.`}
-      >
-        <DebtFilters horizon={horizon} kind={kind} />
-
-        {data.obligations.length === 0 ? (
-          <Empty>
-            No {kindLabel} fall due {horizonLabel === 'to maturity' ? 'from here on' : horizonLabel}. Loans are set up
-            in <Link href="/debt" className="underline">Debt</Link>, where the payment frequency decides which months
-            a note appears in.
-          </Empty>
-        ) : (
-          <div className="overflow-x-auto">
-            <table>
-              <thead>
-                <tr>
-                  <Th>Next due</Th>
-                  <Th>Property</Th>
-                  <Th>Lender</Th>
-                  <Th right>Payments</Th>
-                  <Th right>Interest</Th>
-                  <Th right>Principal</Th>
-                  <Th right>Escrow</Th>
-                  <Th right>Due</Th>
-                  <Th right>Still owed</Th>
-                  <Th>Status</Th>
-                  <Th />
-                </tr>
-              </thead>
-              <tbody>
-                {data.obligations.map((row) => (
-                  <tr key={row.loanId} className="hover:bg-surface-2/50">
-                    <Td>
-                      <span className="num">{row.nextDueDate ?? '—'}</span>
-                    </Td>
-                    <Td>{row.propertyName}</Td>
-                    <Td>
-                      <Link href={`/debt/${row.loanId}`} className="hover:text-accent">
-                        {row.lender}
-                      </Link>
-                      {row.loanType === 'pml' ? <Badge tone="accent">PML</Badge> : null}
-                    </Td>
-                    <Td right>
-                      <span className="num text-[12px] text-muted">{row.periods}</span>
-                    </Td>
-                    <Td right><Money cents={row.interestCents} /></Td>
-                    <Td right>{row.principalCents ? <Money cents={row.principalCents} /> : <span className="num text-muted">—</span>}</Td>
-                    <Td right>{row.escrowCents ? <Money cents={row.escrowCents} /> : <span className="num text-muted">—</span>}</Td>
-                    <Td right>
-                      <Money cents={row.totalCents} />
-                    </Td>
-                    <Td right>
-                      <span className="num text-[12px]">{formatCents(row.stillOwedThisYearCents)}</span>
-                      <span className="mt-0.5 block text-[10px] text-muted">
-                        {formatCents(row.stillOwedToMaturityCents)} to maturity
-                      </span>
-                    </Td>
-                    <Td>
-                      {/*
-                        Only for a single period. Across several, "unpaid" is
-                        read off which periods were marked paid, which knows
-                        nothing about a lump sum settling four of them at once —
-                        so it would sit beside "still owed" contradicting it.
-                        Still owed is the authority; this is the tick box.
-                      */}
-                      {row.periods === 1 ? (
-                        <Badge tone={row.unpaidCents === 0 ? 'good' : 'warn'}>
-                          {row.unpaidCents === 0 ? 'paid' : 'due'}
-                        </Badge>
-                      ) : null}
-                    </Td>
-                    <Td>
-                      {/*
-                        Marking paid settles ONE period, so it is offered only
-                        where the row is one period. Over a year it would be
-                        ambiguous which of twelve it meant.
-                      */}
-                      {row.thisMonth && !row.thisMonth.paid && row.periods === 1 ? (
-                        <LoanPaymentRecorder
-                          loanId={row.loanId}
-                          dueDate={row.thisMonth.dueDate}
-                          interestCents={row.thisMonth.interestCents}
-                          principalCents={row.thisMonth.principalCents}
-                          escrowCents={row.thisMonth.escrowCents}
-                          totalCents={row.thisMonth.totalCents}
-                        />
-                      ) : null}
-                    </Td>
-                  </tr>
-                ))}
-                <tr className="border-t border-line">
-                  <Td><strong>Total</strong></Td>
-                  <Td />
-                  <Td />
-                  <Td right>
-                    <span className="num text-[12px] text-muted">
-                      {data.obligations.reduce((sum, r) => sum + r.periods, 0)}
-                    </span>
-                  </Td>
-                  <Td right>
-                    <strong><Money cents={data.obligations.reduce((sum, r) => sum + r.interestCents, 0)} /></strong>
-                  </Td>
-                  <Td right>
-                    <strong><Money cents={data.obligations.reduce((sum, r) => sum + r.principalCents, 0)} /></strong>
-                  </Td>
-                  <Td right>
-                    <strong><Money cents={data.obligations.reduce((sum, r) => sum + r.escrowCents, 0)} /></strong>
-                  </Td>
-                  <Td right>
-                    <strong><Money cents={data.obligations.reduce((sum, r) => sum + r.totalCents, 0)} /></strong>
-                  </Td>
-                  <Td right>
-                    <strong className="num text-[12px]">
-                      {formatCents(data.obligations.reduce((sum, r) => sum + r.stillOwedThisYearCents, 0))}
-                    </strong>
-                    <span className="mt-0.5 block text-[10px] font-normal text-muted">
-                      {formatCents(data.obligations.reduce((sum, r) => sum + r.stillOwedToMaturityCents, 0))} to maturity
-                    </span>
-                  </Td>
-                  <Td />
-                  <Td />
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Panel>
+      <Note tone="muted">
+        Lenders are owed {formatCents(data.totals.lendersCents)} this month
+        {data.totals.unpaidLendersCents > 0
+          ? `, ${formatCents(data.totals.unpaidLendersCents)} of it still unpaid`
+          : ', all of it recorded as paid'}
+        . Notes, what is still owed on each and where to aim a lump sum live in{' '}
+        <Link href="/debt" className="underline">Debt</Link> — this page is what goes out to owners.
+      </Note>
 
       {withOwners.length === 0 ? (
         <Panel title="Owner distributions">

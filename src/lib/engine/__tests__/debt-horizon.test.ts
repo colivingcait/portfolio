@@ -21,6 +21,12 @@ const NOTE = {
   schedule: Array.from({ length: 12 }, (_, i) => row(`2026-${String(i + 1).padStart(2, '0')}-01`, 666.67)),
   stillOwedThisYearCents: cents(4_666.71),
   stillOwedToMaturityCents: cents(20_000.12),
+  ratePercent: 10,
+  borrowedCents: cents(80_000),
+  paidToDateCents: 0,
+  balanceCents: cents(80_000),
+  maturityDate: '2028-11-01',
+  daysToMaturity: 800,
 };
 
 const MORTGAGE = {
@@ -30,6 +36,12 @@ const MORTGAGE = {
   propertyName: 'Raven',
   loanType: 'mortgage',
   schedule: Array.from({ length: 12 }, (_, i) => row(`2026-${String(i + 1).padStart(2, '0')}-01`, 1_548.02, 154.54, 1_029.33)),
+  ratePercent: 10,
+  borrowedCents: cents(240_000),
+  paidToDateCents: 0,
+  balanceCents: cents(240_000),
+  maturityDate: '2028-11-01',
+  daysToMaturity: 800,
 };
 
 const QUARTERLY = {
@@ -39,6 +51,12 @@ const QUARTERLY = {
   propertyName: 'Raven',
   loanType: 'pml',
   schedule: [row('2026-02-01', 100), row('2026-05-01', 100), row('2026-08-01', 100), row('2026-11-01', 100)],
+  ratePercent: 10,
+  borrowedCents: cents(12_000),
+  paidToDateCents: 0,
+  balanceCents: cents(12_000),
+  maturityDate: '2028-11-01',
+  daysToMaturity: 800,
 };
 
 describe('how far ahead the debt table looks', () => {
@@ -66,14 +84,16 @@ describe('how far ahead the debt table looks', () => {
 
   it('shows one period for a month and none where a quarterly note does not fall', () => {
     expect(obligationsIn('month', '2026-08', 'pml', [QUARTERLY])[0].periods).toBe(1);
-    // September is inside Q3 but the note is not due in it.
-    expect(obligationsIn('month', '2026-09', 'pml', [QUARTERLY])).toEqual([]);
+    // September is inside Q3 but the note is not due in it. It stays on the
+    // list at nought, because a note you still owe is not gone.
+    expect(obligationsIn('month', '2026-09', 'pml', [QUARTERLY])[0].periods).toBe(0);
     expect(obligationsIn('quarter', '2026-09', 'pml', [QUARTERLY])[0].periods).toBe(1);
   });
 
   it('separates the notes paid by hand from the ones on autopay', () => {
     const all = obligationsIn('month', '2026-08', 'all', [NOTE, MORTGAGE]);
     expect(all.map((r) => r.loanId).sort()).toEqual(['mortgage', 'note']);
+    expect(all.find((r) => r.loanId === 'note')!.borrowedCents).toBe(cents(80_000));
     expect(obligationsIn('month', '2026-08', 'pml', [NOTE, MORTGAGE]).map((r) => r.loanId)).toEqual(['note']);
     expect(obligationsIn('month', '2026-08', 'mortgage', [NOTE, MORTGAGE]).map((r) => r.loanId)).toEqual(['mortgage']);
   });

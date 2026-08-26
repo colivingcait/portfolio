@@ -270,6 +270,20 @@ export const DEBT_HORIZONS: { key: DebtHorizon; label: string; hint: string }[] 
   { key: 'maturity', label: 'To maturity', hint: 'Everything from this month to the end of the note.' },
 ];
 
+/**
+ * Whose debt to show.
+ *
+ * Whole by default. The company carries its notes undivided — a partner's
+ * share of a balance is an economic figure, and no lender recognises it, least
+ * of all on a note somebody has personally guaranteed.
+ */
+export type DebtView = 'whole' | 'prorata';
+
+export const DEBT_VIEWS: { key: DebtView; label: string; hint: string }[] = [
+  { key: 'whole', label: 'Whole', hint: 'The full obligation, as the lender sees it.' },
+  { key: 'prorata', label: 'My share', hint: 'Scaled by your effective share. An economic figure, not a legal one.' },
+];
+
 /** Which loans to look at. Mortgages are on autopay; private notes are not. */
 export type DebtKind = 'pml' | 'mortgage' | 'all';
 
@@ -321,6 +335,25 @@ export interface LoanObligation {
   propertyId: string;
   propertyName: string;
   loanType: string;
+  /** Whole-number annual rate: 10 means 10%. */
+  ratePercent: number;
+  /** What was borrowed in the first place. */
+  borrowedCents: Cents;
+  /** Every payment recorded against the note, principal and interest alike. */
+  paidToDateCents: Cents;
+  /** Principal still outstanding. */
+  balanceCents: Cents;
+  maturityDate: IsoDate;
+  daysToMaturity: number;
+  /**
+   * Your effective share of the property, for the pro-rata view.
+   *
+   * Off by default: the company carries its debts whole. A pro-rata figure is
+   * an economic one and a lender does not recognise it — least of all on a
+   * note you have personally guaranteed, where they come after the lot.
+   */
+  sharePercent: number;
+  guaranteed: boolean;
   /** The next payment falling due in the horizon that has not been settled. */
   nextDueDate: IsoDate | null;
   /** Payments falling due in the horizon. */
@@ -359,6 +392,14 @@ export function obligationsIn(
     actualPaymentDates?: readonly IsoDate[];
     stillOwedThisYearCents?: Cents;
     stillOwedToMaturityCents?: Cents;
+    ratePercent: number;
+    borrowedCents: Cents;
+    paidToDateCents: Cents;
+    balanceCents: Cents;
+    maturityDate: IsoDate;
+    daysToMaturity: number;
+    sharePercent: number;
+    guaranteed: boolean;
   }[],
 ): LoanObligation[] {
   const bounds = horizonBounds(horizon, month);
@@ -382,6 +423,14 @@ export function obligationsIn(
         propertyId: loan.propertyId,
         propertyName: loan.propertyName,
         loanType: loan.loanType,
+        ratePercent: loan.ratePercent,
+        borrowedCents: loan.borrowedCents,
+        paidToDateCents: loan.paidToDateCents,
+        balanceCents: loan.balanceCents,
+        maturityDate: loan.maturityDate,
+        daysToMaturity: loan.daysToMaturity,
+        sharePercent: loan.sharePercent,
+        guaranteed: loan.guaranteed,
         nextDueDate: inHorizon.find((row) => !settled(row))?.dueDate ?? inHorizon[0]?.dueDate ?? null,
         periods: inHorizon.length,
         interestCents: sumCents(inHorizon.map((row) => row.interestCents)),
@@ -396,9 +445,9 @@ export function obligationsIn(
         thisMonth: thisMonthRows[0] ?? null,
       };
     })
-    // A loan with nothing due in the horizon is not shown: a quarterly note is
-    // absent from the nine months it does not fall in, which is the point.
-    .filter((row) => row.periods > 0)
+    // Every loan stays on the list even where nothing falls due in the span.
+    // A quarterly note is not gone in the months it does not fall in — it is
+    // simply not due, and dropping it off the page would read as paid off.
     .sort((a, b) => (a.nextDueDate ?? '').localeCompare(b.nextDueDate ?? '') || a.lender.localeCompare(b.lender));
 }
 

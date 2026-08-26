@@ -6,17 +6,13 @@ import { interestSummary, interestYear } from './engine/interest';
 import { effectiveShare } from './engine/ownership';
 import {
   capitalPositions,
-  obligationsIn,
   paymentsDueIn,
   payoutTotals,
   planDistribution,
   reconcileDistributions,
   type CapitalEntry,
   type DistributionCheckRow,
-  type DebtHorizon,
-  type DebtKind,
   type DuePayment,
-  type LoanObligation,
   type OwnerShare,
 } from './engine/payouts';
 import { monthEnd, monthStart, type MonthKey } from './engine/dates';
@@ -34,8 +30,6 @@ export interface PayoutsData {
   month: MonthKey;
   properties: PropertyPayout[];
   due: DuePayment[];
-  /** One row per loan over the chosen horizon, which is what the table shows. */
-  obligations: LoanObligation[];
   totals: ReturnType<typeof payoutTotals>;
   capital: {
     entityId: string;
@@ -51,11 +45,7 @@ export interface PayoutsData {
   properties_: { value: string; label: string }[];
 }
 
-export async function getPayouts(
-  month: MonthKey,
-  horizon: DebtHorizon = 'month',
-  kind: DebtKind = 'pml',
-): Promise<PayoutsData> {
+export async function getPayouts(month: MonthKey): Promise<PayoutsData> {
   const asOf = monthEnd(month);
 
   const [properties, interests, entities, loans, rollups, capitalEntries, ownerMovements] = await Promise.all([
@@ -147,7 +137,6 @@ export async function getPayouts(
   // The month's own rows still drive the stat cards, which are about this
   // month whatever the table is set to look at.
   const due = paymentsDueIn(month, loanShapes);
-  const obligations = obligationsIn(horizon, month, kind, loanShapes);
 
   const allAllocations = payoutProperties.flatMap((p) => p.owners);
 
@@ -205,7 +194,6 @@ export async function getPayouts(
     month,
     properties: payoutProperties,
     due,
-    obligations,
     totals: payoutTotals(due, allAllocations),
     capital: capital.filter((c) => c.contributedCents !== 0 || c.profitDistributedCents !== 0),
     distributionCheck,
