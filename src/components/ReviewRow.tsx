@@ -3,7 +3,10 @@
 import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { confirmTransaction, suggestRule, type RuleScope, type RuleSuggestion } from '@/lib/import-actions';
+import type { Suggestion } from '@/lib/engine/suggest';
 import { formatCents } from '@/lib/engine/money';
+import { splitTransaction } from '@/lib/books-actions';
+import { SplitEditor } from './SplitEditor';
 
 interface Props {
   /**
@@ -17,7 +20,11 @@ interface Props {
   propertyName: string;
   description: string;
   amountCents: number;
-  suggestion: string;
+  /**
+   * What the picker opens on, and why. Null only where nothing has been worked
+   * out — the register always sends one.
+   */
+  suggestion: Suggestion | null;
   /** Set where this row looks like it cancels another one, or is cancelled by it. */
   reversalOf?: {
     description: string;
@@ -41,7 +48,11 @@ export function ReviewRow({
 }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [categoryKey, setCategoryKey] = useState(suggestion);
+  const opensOn = suggestion?.categoryKey ?? (amountCents > 0 ? 'rental_income' : 'maintenance_repairs');
+  const [categoryKey, setCategoryKey] = useState(opensOn);
+  // Once it has been changed by hand the reasoning is stale — it explains a
+  // guess that is no longer on screen, so it goes rather than misleads.
+  const untouched = categoryKey === opensOn;
   // A reversal is a one-off, and a rule written from one would catch the next
   // ordinary charge from the same payee too.
   const [createRule, setCreateRule] = useState(reversalOf === null);
@@ -52,6 +63,7 @@ export function ReviewRow({
   const [match, setMatch] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  const [splitOpen, setSplitOpen] = useState(false);
 
   // What a rule would latch onto, worked out before it is written.
   useEffect(() => {
@@ -150,6 +162,29 @@ export function ReviewRow({
           </div>
         ) : null}
 
+        {splitOpen ? (
+          <SplitEditor
+            amountCents={amountCents}
+            categories={categories}
+            openOn={categoryKey}
+            pending={pending}
+            onCancel={() => setSplitOpen(false)}
+            onSplit={(pieces) => {
+              setError(null);
+              startTransition(async () => {
+                const result = await splitTransaction(id, pieces);
+                if (result.ok) {
+                  setSplitOpen(false);
+                  setDone('Split');
+                  router.refresh();
+                } else {
+                  setError(result.error ?? 'Could not save');
+                }
+              });
+            }}
+          />
+        ) : null}
+
         {error ? <div className="mt-0.5 text-[11px] text-bad">{error}</div> : null}
         {done ? <div className="mt-0.5 text-[11px] text-good">{done}</div> : null}
       </td>
@@ -164,6 +199,20 @@ export function ReviewRow({
             </option>
           ))}
         </select>
+        {/*
+          Why the picker opened where it did. A guess with its reasoning showing
+          can be disagreed with in a glance; one without is indistinguishable
+          from the app having decided something.
+        */}
+        {suggestion && untouched && suggestion.source !== 'direction' ? (
+          <div
+            className={`mt-0.5 text-[10px] leading-snug ${
+              suggestion.confidence === 'high' ? 'text-good' : 'text-muted'
+            }`}
+          >
+            {suggestion.reason}
+          </div>
+        ) : null}
       </td>
       <td className="border-b border-line/60 px-2 py-2">
         <span className="flex items-center gap-3">
@@ -178,6 +227,19 @@ export function ReviewRow({
             className="rounded border border-line px-2 py-1 text-[12px] hover:border-accent disabled:opacity-40"
           >
             {pending ? '…' : 'Confirm'}
+          </button>
+          {/*
+            Split belonged only to filed rows, which had it backwards: the row
+            you most want to split is the one you have not filed, because
+            filing it means picking one wrong category for the whole charge
+            first.
+          */}
+          <button
+            type="button"
+            onClick={() => setSplitOpen((open) => !open)}
+            className="text-[11px] text-muted hover:text-accent"
+          >
+            Split
           </button>
         </span>
       </td>

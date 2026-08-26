@@ -141,7 +141,7 @@ export function RegisterTable({ rows, categories }: Props) {
                   propertyName={row.propertyName}
                   description={row.description}
                   amountCents={row.amountCents}
-                  suggestion={row.suggestion ?? 'maintenance_repairs'}
+                  suggestion={row.suggestion}
                   reversalOf={row.reversalOf}
                 />
               ) : (

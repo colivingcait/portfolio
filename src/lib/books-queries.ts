@@ -7,6 +7,7 @@ import { monthOf, type MonthKey } from './engine/dates';
 import { getCategoryCatalog } from './categories-queries';
 import { category, type CategoryCatalog } from './engine/categories';
 import { findReversals } from './engine/bank';
+import { historyIndex, suggestCategory, type Suggestion } from './engine/suggest';
 import { formatCents } from './engine/money';
 
 export interface TransactionFilters {
@@ -39,11 +40,10 @@ export interface RegisterRow {
   isSplit: boolean;
   splits: { id: string; categoryKey: string | null; categoryLabel: string | null; amountCents: number; memo: string | null }[];
   /**
-   * Where the row has no category yet, what to open the picker on. A credit is
-   * nearly always income and a debit nearly always a cost — a starting point,
-   * not a guess that saves itself.
+   * Where the row has no category yet, what to open the picker on and why.
+   * A starting point, not a guess that saves itself.
    */
-  suggestion: string | null;
+  suggestion: Suggestion | null;
   /** Set where the row looks like it cancels another one, or is cancelled by it. */
   reversalOf: {
     description: string;
@@ -147,6 +147,11 @@ export async function getRegister(filters: TransactionFilters): Promise<Register
   ]);
 
   const reversals = await findReversalHints(rows);
+  // What this landlord has actually filed each payee as, so the picker opens
+  // on the answer they have already given nine times rather than on a guess
+  // from the sign of the amount. One query for the page: the same twenty
+  // payees recur, and asking per row would ask the same question twenty times.
+  const history = rows.some((row) => row.categoryKey === null) ? await payeeHistory() : null;
 
   return {
     rows: rows.map((row) => ({
@@ -155,7 +160,10 @@ export async function getRegister(filters: TransactionFilters): Promise<Register
       propertyName: row.statement.bankAccount.property.name,
       suggestion:
         row.categoryKey === null
-          ? (reversals.get(row.id)?.categoryKey ?? (row.amountCents > 0 ? 'rental_income' : 'maintenance_repairs'))
+          ? suggestCategory(
+              { description: row.description, amountCents: row.amountCents },
+              { catalog, history: history ?? undefined, reversalKey: reversals.get(row.id)?.categoryKey ?? null },
+            )
           : null,
       reversalOf: row.categoryKey === null ? (reversals.get(row.id)?.hint ?? null) : null,
       accountLabel: row.statement.bankAccount.label,
@@ -312,6 +320,32 @@ export async function getBalanceSheet(basis: 'cost' | 'market'): Promise<Balance
  * This used to live on the Review page. It moved here when Review and the
  * register became one screen, so the hint follows the row wherever it is shown.
  */
+/**
+ * Every payee stem you have filed, and what you filed it as.
+ *
+ * Grouped in the database rather than pulled row by row: the answer is a few
+ * hundred pairs however many years of statements sit behind it.
+ */
+async function payeeHistory(): Promise<Map<string, Map<string, number>>> {
+  const groups = await prisma.bankTransaction.groupBy({
+    by: ['description', 'categoryKey'],
+    where: { NOT: { categoryKey: null }, splitParentId: null },
+    _count: { _all: true },
+    orderBy: { _count: { description: 'desc' } },
+    take: 5000,
+  });
+
+  return historyIndex(
+    groups
+      .filter((group): group is typeof group & { categoryKey: string } => group.categoryKey !== null)
+      .map((group) => ({
+        description: group.description,
+        categoryKey: group.categoryKey,
+        count: group._count._all,
+      })),
+  );
+}
+
 async function findReversalHints(
   visible: readonly { id: string; categoryKey: string | null }[],
 ): Promise<Map<string, { categoryKey: string | null; hint: RegisterRow['reversalOf'] }>> {
