@@ -253,6 +253,155 @@ export function paymentsDueIn(
   return due.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 }
 
+/**
+ * How far ahead to look at what the notes cost.
+ *
+ * A mortgage on autopay and a private note settled by hand are not read the
+ * same way. The mortgage needs checking once; the private note is a decision
+ * every month about where to send money, and that decision is made against a
+ * span — this quarter, this year, the whole note — not against one row.
+ */
+export type DebtHorizon = 'month' | 'quarter' | 'year' | 'maturity';
+
+export const DEBT_HORIZONS: { key: DebtHorizon; label: string; hint: string }[] = [
+  { key: 'month', label: 'This month', hint: 'What falls due in the month shown.' },
+  { key: 'quarter', label: 'This quarter', hint: 'The whole calendar quarter the month sits in.' },
+  { key: 'year', label: 'This year', hint: 'The whole calendar year.' },
+  { key: 'maturity', label: 'To maturity', hint: 'Everything from this month to the end of the note.' },
+];
+
+/** Which loans to look at. Mortgages are on autopay; private notes are not. */
+export type DebtKind = 'pml' | 'mortgage' | 'all';
+
+export const DEBT_KINDS: { key: DebtKind; label: string; hint: string }[] = [
+  { key: 'pml', label: 'Private notes', hint: 'The ones paid by hand, in lumps, that need deciding about.' },
+  { key: 'mortgage', label: 'Mortgages', hint: 'On autopay. Worth checking, not worth thinking about.' },
+  { key: 'all', label: 'All loans', hint: 'Everything owed to a lender.' },
+];
+
+export function matchesKind(loanType: string, kind: DebtKind): boolean {
+  if (kind === 'all') return true;
+  if (kind === 'pml') return loanType === 'pml' || loanType === 'seller_financed';
+  // Anything institutional and on a servicer's schedule.
+  return loanType !== 'pml' && loanType !== 'seller_financed';
+}
+
+/** The months a horizon covers, as bounds. `to` open means "until it ends". */
+export function horizonBounds(horizon: DebtHorizon, month: MonthKey): { from: MonthKey; to: MonthKey | null } {
+  const year = month.slice(0, 4);
+  switch (horizon) {
+    case 'quarter': {
+      const first = Math.floor((Number(month.slice(5, 7)) - 1) / 3) * 3 + 1;
+      return {
+        from: `${year}-${String(first).padStart(2, '0')}`,
+        to: `${year}-${String(first + 2).padStart(2, '0')}`,
+      };
+    }
+    case 'year':
+      return { from: `${year}-01`, to: `${year}-12` };
+    case 'maturity':
+      // Forward from the month being viewed: what has already gone is history.
+      return { from: month, to: null };
+    case 'month':
+    default:
+      return { from: month, to: month };
+  }
+}
+
+/**
+ * One row per loan for a horizon, rather than one per period.
+ *
+ * A year of a monthly note is twelve schedule rows and one decision. Rolling
+ * them up is what lets the private notes be compared against each other at the
+ * moment a lump sum is being aimed at one of them.
+ */
+export interface LoanObligation {
+  loanId: string;
+  lender: string;
+  propertyId: string;
+  propertyName: string;
+  loanType: string;
+  /** The next payment falling due in the horizon that has not been settled. */
+  nextDueDate: IsoDate | null;
+  /** Payments falling due in the horizon. */
+  periods: number;
+  interestCents: Cents;
+  principalCents: Cents;
+  escrowCents: Cents;
+  totalCents: Cents;
+  /** Of that total, what has not been settled. */
+  unpaidCents: Cents;
+  /** Interest still owed on the note, from the ledger. */
+  stillOwedThisYearCents: Cents;
+  stillOwedToMaturityCents: Cents;
+  /** The month's own payment, where there is one — what "mark paid" acts on. */
+  thisMonth: DuePayment | null;
+}
+
+export function obligationsIn(
+  horizon: DebtHorizon,
+  month: MonthKey,
+  kind: DebtKind,
+  loans: readonly {
+    loanId: string;
+    lender: string;
+    propertyId: string;
+    propertyName: string;
+    loanType: string;
+    schedule: readonly {
+      dueDate: IsoDate;
+      interestCents: Cents;
+      principalCents: Cents;
+      escrowCents: Cents;
+      paymentCents: Cents;
+      actual: boolean;
+    }[];
+    actualPaymentDates?: readonly IsoDate[];
+    stillOwedThisYearCents?: Cents;
+    stillOwedToMaturityCents?: Cents;
+  }[],
+): LoanObligation[] {
+  const bounds = horizonBounds(horizon, month);
+
+  return loans
+    .filter((loan) => matchesKind(loan.loanType, kind))
+    .map((loan) => {
+      const inHorizon = loan.schedule.filter((row) => {
+        const rowMonth = monthOf(row.dueDate);
+        return rowMonth >= bounds.from && (bounds.to === null || rowMonth <= bounds.to);
+      });
+
+      const settled = (row: (typeof inHorizon)[number]) =>
+        row.actual || (loan.actualPaymentDates ?? []).some((d) => monthOf(d) === monthOf(row.dueDate));
+
+      const thisMonthRows = paymentsDueIn(month, [loan]);
+
+      return {
+        loanId: loan.loanId,
+        lender: loan.lender,
+        propertyId: loan.propertyId,
+        propertyName: loan.propertyName,
+        loanType: loan.loanType,
+        nextDueDate: inHorizon.find((row) => !settled(row))?.dueDate ?? inHorizon[0]?.dueDate ?? null,
+        periods: inHorizon.length,
+        interestCents: sumCents(inHorizon.map((row) => row.interestCents)),
+        principalCents: sumCents(inHorizon.map((row) => row.principalCents)),
+        escrowCents: sumCents(inHorizon.map((row) => row.escrowCents)),
+        totalCents: sumCents(inHorizon.map((row) => row.paymentCents + row.escrowCents)),
+        unpaidCents: sumCents(
+          inHorizon.filter((row) => !settled(row)).map((row) => row.paymentCents + row.escrowCents),
+        ),
+        stillOwedThisYearCents: loan.stillOwedThisYearCents ?? 0,
+        stillOwedToMaturityCents: loan.stillOwedToMaturityCents ?? 0,
+        thisMonth: thisMonthRows[0] ?? null,
+      };
+    })
+    // A loan with nothing due in the horizon is not shown: a quarterly note is
+    // absent from the nine months it does not fall in, which is the point.
+    .filter((row) => row.periods > 0)
+    .sort((a, b) => (a.nextDueDate ?? '').localeCompare(b.nextDueDate ?? '') || a.lender.localeCompare(b.lender));
+}
+
 export interface PayoutTotals {
   lendersCents: Cents;
   ownersCents: Cents;
