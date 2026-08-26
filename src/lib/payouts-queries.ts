@@ -2,6 +2,7 @@ import 'server-only';
 import { prisma } from './db';
 import { toLoanPayment, toLoanTerms, toOwnershipInterest, requireIsoDate } from './mappers';
 import { buildSchedule } from './engine/amortization';
+import { interestSummary, interestYear } from './engine/interest';
 import { effectiveShare } from './engine/ownership';
 import {
   capitalPositions,
@@ -114,15 +115,26 @@ export async function getPayouts(month: MonthKey): Promise<PayoutsData> {
 
   const due = paymentsDueIn(
     month,
-    loans.map((loan) => ({
-      loanId: loan.id,
-      lender: loan.lender,
-      propertyId: loan.propertyId,
-      propertyName: loan.property.name,
-      loanType: loan.type,
-      schedule: buildSchedule(toLoanTerms(loan), loan.payments.map(toLoanPayment)),
-      actualPaymentDates: loan.payments.filter((p) => p.source === 'actual').map((p) => requireIsoDate(p.date)),
-    })),
+    loans.map((loan) => {
+      const terms = toLoanTerms(loan);
+      const records = loan.payments.map(toLoanPayment);
+      // What the note still costs, as against what falls due this month. Both
+      // are net of arrears carried in and of anything already paid.
+      const year = interestYear(terms, records, Number(month.slice(0, 4)));
+      const summary = interestSummary(terms, records, asOf);
+
+      return {
+        loanId: loan.id,
+        lender: loan.lender,
+        propertyId: loan.propertyId,
+        propertyName: loan.property.name,
+        loanType: loan.type,
+        schedule: buildSchedule(terms, records),
+        actualPaymentDates: loan.payments.filter((p) => p.source === 'actual').map((p) => requireIsoDate(p.date)),
+        stillOwedThisYearCents: year.stillOwedCents,
+        stillOwedToMaturityCents: summary.arrearsCents + summary.remainingToMaturityCents,
+      };
+    }),
   );
 
   const allAllocations = payoutProperties.flatMap((p) => p.owners);

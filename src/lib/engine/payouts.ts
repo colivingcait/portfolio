@@ -184,6 +184,17 @@ export interface DuePayment {
   /** True where a payment has already been recorded for this period. */
   paid: boolean;
   paidAmountCents: Cents | null;
+  /**
+   * Interest still owed on the note for the calendar year, and to maturity —
+   * arrears carried in included, anything already paid taken off.
+   *
+   * The row says what falls due this month; these say what the note still
+   * costs. Where lump sums are how a lender gets paid, the second question is
+   * the one being answered when deciding where to send one, and the schedule
+   * cannot answer it on its own.
+   */
+  stillOwedThisYearCents: Cents;
+  stillOwedToMaturityCents: Cents;
 }
 
 /**
@@ -209,6 +220,9 @@ export function paymentsDueIn(
       actual: boolean;
     }[];
     actualPaymentDates?: readonly IsoDate[];
+    /** From the interest ledger, which needs the terms this function is not given. */
+    stillOwedThisYearCents?: Cents;
+    stillOwedToMaturityCents?: Cents;
   }[],
 ): DuePayment[] {
   const due: DuePayment[] = [];
@@ -230,6 +244,8 @@ export function paymentsDueIn(
         totalCents: row.paymentCents + row.escrowCents,
         paid: row.actual || paidInMonth.length > 0,
         paidAmountCents: row.actual ? row.paymentCents + row.escrowCents : null,
+        stillOwedThisYearCents: loan.stillOwedThisYearCents ?? 0,
+        stillOwedToMaturityCents: loan.stillOwedToMaturityCents ?? 0,
       });
     }
   }

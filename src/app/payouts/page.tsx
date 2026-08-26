@@ -47,7 +47,7 @@ export default async function PayoutsPage({
 
       <Panel
         title="Debt payments due"
-        description="Interest is charged on the balance outstanding at the note's rate. A quarterly note appears in the three months it falls due and in none of the other nine."
+        description={`Interest is charged on the balance outstanding at the note's rate. A quarterly note appears in the three months it falls due and in none of the other nine. "Still owed" is what the note costs beyond this month's row — arrears carried in included, anything already paid taken off — so a lump sum can be aimed at whichever note it does the most good against. Record one on the lender's own page.`}
       >
         {data.due.length === 0 ? (
           <Empty>
@@ -66,6 +66,7 @@ export default async function PayoutsPage({
                 <Th right>Principal</Th>
                 <Th right>Escrow</Th>
                 <Th right>Total</Th>
+                <Th right>Still owed</Th>
                 <Th>Status</Th>
                 <Th />
               </tr>
@@ -95,6 +96,12 @@ export default async function PayoutsPage({
                   <Td right>
                     <Money cents={payment.totalCents} />
                   </Td>
+                  <Td right>
+                    <span className="num text-[12px]">{formatCents(payment.stillOwedThisYearCents)}</span>
+                    <span className="mt-0.5 block text-[10px] text-muted">
+                      {formatCents(payment.stillOwedToMaturityCents)} to maturity
+                    </span>
+                  </Td>
                   <Td>
                     <Badge tone={payment.paid ? 'good' : 'warn'}>{payment.paid ? 'paid' : 'due'}</Badge>
                   </Td>
@@ -112,6 +119,29 @@ export default async function PayoutsPage({
                   </Td>
                 </tr>
               ))}
+              <tr className="border-t border-line">
+                <Td><strong>Total</strong></Td>
+                <Td />
+                <Td />
+                <Td right>
+                  <strong><Money cents={data.due.reduce((sum, d) => sum + d.interestCents, 0)} /></strong>
+                </Td>
+                <Td />
+                <Td />
+                <Td right>
+                  <strong><Money cents={data.totals.lendersCents} /></strong>
+                </Td>
+                <Td right>
+                  <strong className="num text-[12px]">
+                    {formatCents(data.due.reduce((sum, d) => sum + d.stillOwedThisYearCents, 0))}
+                  </strong>
+                  <span className="mt-0.5 block text-[10px] font-normal text-muted">
+                    {formatCents(data.due.reduce((sum, d) => sum + d.stillOwedToMaturityCents, 0))} to maturity
+                  </span>
+                </Td>
+                <Td />
+                <Td />
+              </tr>
             </tbody>
           </table>
         )}
@@ -263,6 +293,29 @@ export default async function PayoutsPage({
                   </Td>
                 </tr>
               ))}
+              <tr className="border-t border-line">
+                <Td><strong>Total</strong></Td>
+                <Td />
+                <Td />
+                <Td right>
+                  <strong><Money cents={data.due.reduce((sum, d) => sum + d.interestCents, 0)} /></strong>
+                </Td>
+                <Td />
+                <Td />
+                <Td right>
+                  <strong><Money cents={data.totals.lendersCents} /></strong>
+                </Td>
+                <Td right>
+                  <strong className="num text-[12px]">
+                    {formatCents(data.due.reduce((sum, d) => sum + d.stillOwedThisYearCents, 0))}
+                  </strong>
+                  <span className="mt-0.5 block text-[10px] font-normal text-muted">
+                    {formatCents(data.due.reduce((sum, d) => sum + d.stillOwedToMaturityCents, 0))} to maturity
+                  </span>
+                </Td>
+                <Td />
+                <Td />
+              </tr>
             </tbody>
           </table>
         )}
