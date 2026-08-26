@@ -8,7 +8,7 @@
  */
 
 import { addMonths, covers, daysBetween, monthOf, type IsoDate, type MonthKey } from './dates';
-import { roundCents, type Cents } from './money';
+import { roundCents, sumCents, type Cents } from './money';
 
 export type LoanStructure =
   | 'fully_amortizing'
@@ -271,85 +271,102 @@ export function buildSchedule(
 }
 
 /**
- * Interest paid ahead of time, spread over the periods it covers.
+ * Interest charged period by period, against interest actually paid.
  *
- * Private notes are frequently settled in lumps — a year of interest in one
- * cheque rather than twelve. Recording that as a period payment would put the
- * whole year's interest in one month and still show every later month as owing,
- * so the money would be counted twice and the lender would look unpaid.
+ * Private notes are settled irregularly — a lump now, monthly later, months
+ * missed in between — and the schedule alone cannot say what is owed. This
+ * pairs the two.
  *
- * Instead an advance becomes a credit at the month it was paid, and each
- * period draws on it until it runs out. What the credit does not cover is
- * still due in cash. Principal is untouched: prepaying interest does not buy
- * down a note.
+ * Money settles the OLDEST unpaid period first, which is how any lender
+ * applies it and the only reading that survives arrears. An earlier version
+ * credited a payment forward from the month it was written, so $5,000 against
+ * nine unpaid months claimed the note was paid six months into the future
+ * while every one of those nine stayed outstanding. Oldest-first cannot do
+ * that: what is left over once the past is settled — and only that — becomes
+ * credit against periods still to come.
+ *
+ * Interest accrues on the balance at the note's rate whatever was paid.
+ * Recording a short payment must not quietly reduce what was charged, or the
+ * shortfall stops being visible the moment it is written down.
  */
 export interface InterestCoverageRow {
   period: number;
   dueDate: IsoDate;
   month: MonthKey;
-  /** What the note charges for this period, from the terms. */
+  /** What the note charges for this period, from the balance and the rate. */
   accruedCents: Cents;
-  /** Met out of an advance rather than paid this period. */
-  coveredCents: Cents;
-  /** Still to pay in cash for this period. */
-  cashDueCents: Cents;
-  /** Advance paid in this month, which is cash out now whatever it covers. */
-  advancePaidCents: Cents;
-  /** Credit left over after this period. */
-  creditAfterCents: Cents;
+  /** Met out of money paid, whenever it was paid. */
+  settledCents: Cents;
+  /** Still owed for this period. */
+  outstandingCents: Cents;
+  /** Interest cash that left the account in this month. */
+  paidThisMonthCents: Cents;
 }
 
 export function interestCoverage(
   terms: LoanTerms,
   payments: readonly LoanPaymentRecord[] = [],
 ): InterestCoverageRow[] {
-  const advances = new Map<MonthKey, Cents>();
-  for (const payment of payments) {
-    if (payment.source !== 'advance') continue;
+  const perYear = periodsPerYear(terms.paymentFrequency);
+  const rows = buildSchedule(terms, payments);
+
+  const interestPayments = payments.filter((p) => p.source === 'actual' || p.source === 'advance');
+  const paidByMonth = new Map<MonthKey, Cents>();
+  for (const payment of interestPayments) {
     const month = monthOf(payment.date);
-    advances.set(month, (advances.get(month) ?? 0) + payment.interestCents);
+    paidByMonth.set(month, (paidByMonth.get(month) ?? 0) + payment.interestCents);
   }
 
-  // The schedule already ignores anything that is not an actual period
-  // payment, so it gives accrual from the terms with advances left out.
-  const rows = buildSchedule(terms, payments);
-  let credit = 0;
+  let pool = sumCents(interestPayments.map((p) => p.interestCents));
 
-  const covered = rows.map((row) => {
-    const advancePaid = advances.get(row.month) ?? 0;
-    credit += advancePaid;
-    const coveredCents = Math.min(credit, row.interestCents);
-    credit -= coveredCents;
+  const covered: InterestCoverageRow[] = rows.map((row) => {
+    // From the opening balance and the rate, never from what happened to be
+    // paid: a $500 cheque against $666.67 owed leaves $166.67 owed.
+    const accrued = periodInterest(row.openingBalanceCents, terms.annualRatePercent, perYear);
+    const settled = Math.min(pool, accrued);
+    pool -= settled;
     return {
       period: row.period,
       dueDate: row.dueDate,
       month: row.month,
-      accruedCents: row.interestCents,
-      coveredCents,
-      cashDueCents: row.interestCents - coveredCents,
-      advancePaidCents: advancePaid,
-      creditAfterCents: credit,
+      accruedCents: accrued,
+      settledCents: settled,
+      outstandingCents: accrued - settled,
+      paidThisMonthCents: paidByMonth.get(row.month) ?? 0,
     };
   });
 
-  // An advance paid after the last scheduled period still happened. It has
-  // nothing left to cover, but the cash left the account.
+  // Cash paid in a month with no period of its own still left the account.
   const months = new Set(rows.map((row) => row.month));
-  for (const [month, cents] of advances) {
+  for (const [month, cents] of paidByMonth) {
     if (months.has(month)) continue;
     covered.push({
       period: 0,
       dueDate: `${month}-01`,
       month,
       accruedCents: 0,
-      coveredCents: 0,
-      cashDueCents: 0,
-      advancePaidCents: cents,
-      creditAfterCents: credit + cents,
+      settledCents: 0,
+      outstandingCents: 0,
+      paidThisMonthCents: cents,
     });
   }
 
   return covered.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+}
+
+/** Interest paid beyond everything charged so far: what you are ahead by. */
+export function interestCreditAt(
+  terms: LoanTerms,
+  payments: readonly LoanPaymentRecord[],
+  asOf: IsoDate,
+): Cents {
+  const month = monthOf(asOf);
+  const coverage = interestCoverage(terms, payments);
+  const chargedSoFar = sumCents(coverage.filter((r) => r.month <= month).map((r) => r.accruedCents));
+  const paid = sumCents(
+    payments.filter((p) => p.source === 'actual' || p.source === 'advance').map((p) => p.interestCents),
+  );
+  return Math.max(0, paid - chargedSoFar);
 }
 
 /** Balance outstanding at a date, honouring actual payments made by then. */
@@ -434,10 +451,13 @@ export function debtServiceForMonth(
   if (!advanced) return split ? split.principalCents + split.interestCents : 0;
 
   const coverage = interestCoverage(terms, payments).filter((row) => row.month === month);
-  const advancePaid = coverage.reduce((total, row) => total + row.advancePaidCents, 0);
-  const interestDue = coverage.reduce((total, row) => total + row.cashDueCents, 0);
+  // Cash that actually left this month, plus a forecast for anything still
+  // outstanding. A period settled by a lump written in another month costs
+  // nothing here — the money moved when the lump did.
+  const paid = coverage.reduce((total, row) => total + row.paidThisMonthCents, 0);
+  const stillOwed = coverage.reduce((total, row) => total + row.outstandingCents, 0);
   const principal = split ? split.principalCents : 0;
-  return principal + interestDue + advancePaid;
+  return principal + paid + stillOwed;
 }
 
 export interface MaturityLadderEntry<T> {

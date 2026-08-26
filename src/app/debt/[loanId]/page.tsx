@@ -30,6 +30,7 @@ export default async function LoanPage({ params }: { params: Promise<{ loanId: s
   const interest = interestSummary(terms, payments, asOf);
   const years = interestYears(terms, payments).map((year) => interestYear(terms, payments, year));
   const advances = payments.filter((payment) => payment.source === 'advance');
+  const thisYearRow = years.find((year) => year.year === thisYear);
 
   return (
     <>
@@ -68,32 +69,36 @@ export default async function LoanPage({ params }: { params: Promise<{ loanId: s
 
       <Panel
         title="Interest"
-        description="What the note charges, against what has been paid. A private lender settled in lumps rather than monthly is the case this exists for: an advance is credited forward against the periods it covers, so what is left to pay falls rather than the same money being counted twice."
+        description="What the note charges, against what has been paid. A private lender settled in lumps rather than monthly is the case this exists for: money settles the oldest unpaid period first, the way a lender applies it, so a lump against months of arrears clears the arrears rather than claiming the note is paid into next year."
       >
         <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Stat
-            label={`${thisYear} interest`}
-            value={formatCents(years.find((y) => y.year === thisYear)?.accruedCents ?? 0)}
-            hint="What the note charges across the calendar year."
+            label={`Still owed for ${thisYear}`}
+            value={formatCents(thisYearRow?.stillOwedCents ?? 0)}
+            hint={`${formatCents(thisYearRow?.chargedCents ?? 0)} charged this year${
+              thisYearRow?.broughtForwardCents ? `, plus ${formatCents(thisYearRow.broughtForwardCents)} carried in` : ''
+            }.`}
+            tone={(thisYearRow?.stillOwedCents ?? 0) > 0 ? 'bad' : 'muted'}
+          />
+          <Stat
+            label="Behind"
+            value={interest.arrearsCents > 0 ? formatCents(interest.arrearsCents) : 'up to date'}
+            hint={
+              interest.paidThrough
+                ? `Settled in full through ${interest.paidThrough}.`
+                : 'Nothing has been settled in full yet.'
+            }
+            tone={interest.arrearsCents > 0 ? 'bad' : 'muted'}
           />
           <Stat
             label="Paid ahead"
-            value={formatCents(interest.creditCents)}
-            hint={
-              interest.paidThrough
-                ? `Covered through ${interest.paidThrough}.`
-                : 'No interest has been paid ahead of its period.'
-            }
-          />
-          <Stat
-            label="In arrears"
-            value={interest.arrearsCents > 0 ? formatCents(interest.arrearsCents) : '—'}
-            hint="Fallen due, not covered and not paid."
+            value={interest.creditCents > 0 ? formatCents(interest.creditCents) : '—'}
+            hint="Paid beyond everything charged so far."
           />
           <Stat
             label="Left to maturity"
-            value={formatCents(interest.remainingToMaturityCents)}
-            hint={`Cash still to pay between now and ${interest.maturityDate}.`}
+            value={formatCents(interest.arrearsCents + interest.remainingToMaturityCents)}
+            hint={`Everything still owed between now and ${interest.maturityDate}.`}
           />
         </div>
 
@@ -102,10 +107,10 @@ export default async function LoanPage({ params }: { params: Promise<{ loanId: s
             <tr>
               <Th>Year</Th>
               <Th right>Periods</Th>
-              <Th right>Interest charged</Th>
-              <Th right>Paid ahead</Th>
-              <Th right>Paid as due</Th>
-              <Th right>Still to pay</Th>
+              <Th right>Owed coming in</Th>
+              <Th right>Charged</Th>
+              <Th right>Paid</Th>
+              <Th right>Still owed</Th>
             </tr>
           </thead>
           <tbody>
@@ -117,10 +122,18 @@ export default async function LoanPage({ params }: { params: Promise<{ loanId: s
                 <Td right>
                   <span className="num">{year.periods}</span>
                 </Td>
-                <Td right><Money cents={year.accruedCents} /></Td>
-                <Td right>{year.advancesPaidCents ? <Money cents={year.advancesPaidCents} /> : <span className="num text-muted">—</span>}</Td>
-                <Td right>{year.periodPaidCents ? <Money cents={year.periodPaidCents} /> : <span className="num text-muted">—</span>}</Td>
-                <Td right>{year.cashDueCents ? <Money cents={year.cashDueCents} /> : <span className="num text-muted">nothing owing</span>}</Td>
+                <Td right>{year.broughtForwardCents ? <Money cents={year.broughtForwardCents} /> : <span className="num text-muted">—</span>}</Td>
+                <Td right><Money cents={year.chargedCents} /></Td>
+                <Td right>{year.paidCents ? <Money cents={year.paidCents} /> : <span className="num text-muted">—</span>}</Td>
+                <Td right>
+                  {year.stillOwedCents ? (
+                    <span className={year.year <= thisYear ? 'text-bad' : ''}>
+                      <Money cents={year.stillOwedCents} />
+                    </span>
+                  ) : (
+                    <span className="num text-muted">nothing owing</span>
+                  )}
+                </Td>
               </tr>
             ))}
           </tbody>
@@ -128,9 +141,9 @@ export default async function LoanPage({ params }: { params: Promise<{ loanId: s
 
         <div className="mt-4 border-t border-line pt-4">
           <p className="mb-2 text-[11px] leading-relaxed text-muted">
-            Record a lump-sum interest payment. It lands as cash in the month it was written and is then credited
-            against each period until it runs out — it does not pay down principal, because prepaying interest never
-            does.
+            Record a lump-sum interest payment. It settles the oldest unpaid period first and works forward; whatever
+            is left once the past is clear becomes credit against periods still to come. It never pays down principal,
+            because prepaying interest does not.
           </p>
           <InterestAdvanceForm loanId={loanId} today={asOf} />
         </div>
@@ -223,11 +236,21 @@ export default async function LoanPage({ params }: { params: Promise<{ loanId: s
   );
 }
 
-function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function Stat({
+  label,
+  value,
+  hint,
+  tone = 'muted',
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  tone?: 'muted' | 'bad';
+}) {
   return (
     <div className="rounded-lg border border-line bg-surface px-3 py-3 shadow-[0_1px_2px_rgba(16,24,40,0.05)]">
       <div className="text-[11px] uppercase tracking-wide text-muted">{label}</div>
-      <div className="num mt-1 text-left text-[18px]">{value}</div>
+      <div className={`num mt-1 text-left text-[18px] ${tone === 'bad' ? 'text-bad' : ''}`}>{value}</div>
       {hint ? <div className="mt-1 text-[11px] leading-snug text-muted">{hint}</div> : null}
     </div>
   );

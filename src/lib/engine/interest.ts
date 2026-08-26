@@ -1,6 +1,6 @@
 import {
-  buildSchedule,
   interestCoverage,
+  interestCreditAt,
   maturityDateOf,
   type LoanPaymentRecord,
   type LoanTerms,
@@ -22,20 +22,20 @@ export interface InterestSummary {
   totalTermCents: Cents;
   /** Charged up to and including the month `asOf` falls in. */
   accruedToDateCents: Cents;
-  /** Every advance written, whatever it covers. */
+  /** Every interest payment made, however it was recorded. */
+  paidCents: Cents;
+  /** The part of it written as a lump ahead of a period. */
   advancesPaidCents: Cents;
-  /** Period payments made, which settle their own period. */
-  periodInterestPaidCents: Cents;
   /**
-   * Advance credit not yet consumed: what you are ahead by. Never negative —
-   * being behind is arrears, and that is what `arrearsCents` is for.
+   * Paid beyond everything charged so far: what you are ahead by. Never
+   * negative — being behind is arrears, and that is `arrearsCents`.
    */
   creditCents: Cents;
-  /** Accrued, not covered, and past due. */
+  /** Charged, fallen due and still unpaid. */
   arrearsCents: Cents;
-  /** Cash still to pay between `asOf` and maturity. */
+  /** Still to pay for periods after `asOf`. */
   remainingToMaturityCents: Cents;
-  /** The last period an advance has fully covered, or null if none. */
+  /** The last period settled in full with nothing missed before it. */
   paidThrough: IsoDate | null;
   maturityDate: IsoDate;
 }
@@ -48,34 +48,31 @@ export function interestSummary(
   const coverage = interestCoverage(terms, payments);
   const month = monthOf(asOf);
 
-  const upToNow = coverage.filter((row) => row.month <= month);
-  const ahead = coverage.filter((row) => row.month > month);
+  const chargedSoFar = coverage.filter((row) => row.month <= month);
+  const stillToCome = coverage.filter((row) => row.month > month);
 
-  const advancesPaidCents = sumCents(coverage.map((row) => row.advancePaidCents));
-  const periodInterestPaidCents = sumCents(
-    payments.filter((p) => p.source === 'actual').map((p) => p.interestCents),
-  );
+  const interestPaid = payments.filter((p) => p.source === 'actual' || p.source === 'advance');
 
-  // Credit left over at the end of the last period that has come round.
-  const last = upToNow[upToNow.length - 1];
-  const creditCents = last ? last.creditAfterCents : 0;
-
-  // Arrears is what has fallen due, was not covered by a credit, and was not
-  // met by a period payment either.
-  const dueSoFar = sumCents(upToNow.map((row) => row.cashDueCents));
-  const arrearsCents = Math.max(0, dueSoFar - periodInterestPaidCents);
-
-  const fullyCovered = coverage.filter((row) => row.accruedCents > 0 && row.cashDueCents === 0);
-  const paidThrough = fullyCovered.length ? fullyCovered[fullyCovered.length - 1].dueDate : null;
+  // Fully settled periods, up to the first one that is not. A note can be
+  // settled through March and again through July with June missed; the honest
+  // answer is March.
+  let paidThrough: IsoDate | null = null;
+  for (const row of coverage) {
+    if (row.accruedCents === 0) continue;
+    if (row.outstandingCents > 0) break;
+    paidThrough = row.dueDate;
+  }
 
   return {
-    totalTermCents: sumCents(buildSchedule(terms, payments).map((row) => row.interestCents)),
-    accruedToDateCents: sumCents(upToNow.map((row) => row.accruedCents)),
-    advancesPaidCents,
-    periodInterestPaidCents,
-    creditCents,
-    arrearsCents,
-    remainingToMaturityCents: sumCents(ahead.map((row) => row.cashDueCents)),
+    totalTermCents: sumCents(coverage.map((row) => row.accruedCents)),
+    accruedToDateCents: sumCents(chargedSoFar.map((row) => row.accruedCents)),
+    paidCents: sumCents(interestPaid.map((p) => p.interestCents)),
+    advancesPaidCents: sumCents(
+      interestPaid.filter((p) => p.source === 'advance').map((p) => p.interestCents),
+    ),
+    creditCents: interestCreditAt(terms, payments, asOf),
+    arrearsCents: sumCents(chargedSoFar.map((row) => row.outstandingCents)),
+    remainingToMaturityCents: sumCents(stillToCome.map((row) => row.outstandingCents)),
     paidThrough,
     maturityDate: maturityDateOf(terms),
   };
@@ -83,24 +80,27 @@ export function interestSummary(
 
 export interface InterestYear {
   year: number;
+  /** Owed from periods before this year, still unpaid at its start. */
+  broughtForwardCents: Cents;
   /** What the note charges across the calendar year. */
-  accruedCents: Cents;
-  /** Advances written during the year, whatever period they cover. */
-  advancesPaidCents: Cents;
-  /** Period payments made during the year. */
-  periodPaidCents: Cents;
-  /** Still to pay in cash for the year's periods. */
-  cashDueCents: Cents;
-  /** Months of the year the note is on the books for. */
+  chargedCents: Cents;
+  /** Interest cash paid during the year, whatever period it settled. */
+  paidCents: Cents;
+  /** Brought forward plus charged, less what the year's periods have settled. */
+  stillOwedCents: Cents;
+  /** Periods falling due in the year. */
   periods: number;
 }
 
 /**
- * A calendar year, which is the year a lender and an accountant both mean.
+ * A calendar year as a running account: owed coming in, charged, paid, owed
+ * going out. That is the shape of the question a private lender is asked —
+ * "what do we still owe you this year" — and a schedule cannot answer it,
+ * because the answer depends on what has been paid and when.
  *
- * Not the note's own anniversary year: interest is reported and deducted on
- * the calendar, and a private note that started in April would otherwise give
- * two different "annual interest" figures depending on who was asking.
+ * Calendar, not the note's own anniversary: interest is reported and deducted
+ * on the calendar, and an anniversary year would give two different answers
+ * depending on who was asking.
  */
 export function interestYear(
   terms: LoanTerms,
@@ -108,19 +108,22 @@ export function interestYear(
   year: number,
 ): InterestYear {
   const prefix = String(year);
-  const coverage = interestCoverage(terms, payments).filter((row) => row.month.startsWith(prefix));
-
-  const inYear = (date: IsoDate) => date.startsWith(prefix);
+  const coverage = interestCoverage(terms, payments);
+  const before = coverage.filter((row) => row.month < `${prefix}-01`);
+  const inYear = coverage.filter((row) => row.month.startsWith(prefix));
 
   return {
     year,
-    accruedCents: sumCents(coverage.map((row) => row.accruedCents)),
-    advancesPaidCents: sumCents(coverage.map((row) => row.advancePaidCents)),
-    periodPaidCents: sumCents(
-      payments.filter((p) => p.source === 'actual' && inYear(p.date)).map((p) => p.interestCents),
+    broughtForwardCents: sumCents(before.map((row) => row.outstandingCents)),
+    chargedCents: sumCents(inYear.map((row) => row.accruedCents)),
+    paidCents: sumCents(
+      payments
+        .filter((p) => (p.source === 'actual' || p.source === 'advance') && p.date.startsWith(prefix))
+        .map((p) => p.interestCents),
     ),
-    cashDueCents: sumCents(coverage.map((row) => row.cashDueCents)),
-    periods: coverage.filter((row) => row.accruedCents > 0).length,
+    stillOwedCents:
+      sumCents(before.map((row) => row.outstandingCents)) + sumCents(inYear.map((row) => row.outstandingCents)),
+    periods: inYear.filter((row) => row.accruedCents > 0).length,
   };
 }
 
