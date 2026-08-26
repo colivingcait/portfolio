@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { getPnl } from '@/lib/books-queries';
 import { BooksTabs } from '@/components/BooksTabs';
+import { FilterBar } from '@/components/FilterBar';
 import { ExportButton } from '@/components/ExportButton';
 import { Empty, Explainer, Money, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
 import { Legend, LineChart, SERIES, StackedBar } from '@/components/charts';
@@ -19,6 +20,14 @@ export default async function PnlPage({
   const propertyParam = Array.isArray(params.property) ? params.property[0] : params.property;
   const year = Number(yearParam ?? new Date().getFullYear());
   const data = await getPnl(year, propertyParam && propertyParam !== '' ? propertyParam : null);
+
+  // Changing the year should not silently drop the property, or the reverse.
+  const linkTo = (overrides: { year?: string; property?: string }) => {
+    const next = new URLSearchParams();
+    const current = { year: String(year), property: data.propertyId ?? undefined, ...overrides };
+    for (const [key, value] of Object.entries(current)) if (value) next.set(key, value);
+    return `/books/pnl?${next.toString()}`;
+  };
 
   const short = (month: string) => MONTH_LABEL[Number(month.slice(5, 7)) - 1];
   const dollars = (cents: number) => (cents / 100).toFixed(2);
@@ -114,39 +123,44 @@ export default async function PnlPage({
         </div>
       </Explainer>
 
-      <Panel title="Period">
-        <form method="get" className="grid grid-cols-12 gap-3">
-          <div className="col-span-12 sm:col-span-3">
-            <label className="mb-1 block text-[11px] uppercase tracking-wide text-muted" htmlFor="year">Year</label>
-            <select id="year" name="year" defaultValue={String(year)}>
-              {[...new Set([year, ...data.years])].sort((a, b) => b - a).map((y) => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-            </select>
-          </div>
-          <div className="col-span-12 sm:col-span-4">
-            <label className="mb-1 block text-[11px] uppercase tracking-wide text-muted" htmlFor="property">Property</label>
-            <select id="property" name="property" defaultValue={data.propertyId ?? ''}>
-              <option value="">All properties (consolidated)</option>
-              {data.properties.map((p) => (
-                <option key={p.value} value={p.value}>{p.label}</option>
-              ))}
-            </select>
-          </div>
-          <div className="col-span-12 flex items-center pt-1">
-            <button type="submit" className="rounded-md border border-line bg-surface-2 px-3 py-1.5 text-[13px] hover:border-accent">
-              Show
-            </button>
-          </div>
-        </form>
-      </Panel>
+      <FilterBar
+        groups={[
+          {
+            label: 'Year',
+            primary: true,
+            options: [...new Set([year, ...data.years])]
+              .sort((a, b) => b - a)
+              .map((y) => ({
+                label: String(y),
+                href: linkTo({ year: String(y) }),
+                active: y === year,
+              })),
+          },
+          {
+            label: 'Property',
+            options: [
+              {
+                label: 'All properties',
+                href: linkTo({ property: undefined }),
+                active: data.propertyId === null,
+                hint: 'Consolidated across everything you hold',
+              },
+              ...data.properties.map((property) => ({
+                label: property.label,
+                href: linkTo({ property: property.value }),
+                active: data.propertyId === property.value,
+              })),
+            ],
+          },
+        ]}
+      />
 
       {data.uncategorizedCount > 0 ? (
         <Note tone="bad">
           {data.uncategorizedCount} transactions in {year} have no category, totalling{' '}
           <Money cents={data.uncategorizedCents} />. They are in none of the figures below, which will look finished
           either way — that is the danger. Clear them in{' '}
-          <Link href="/review" className="underline">Review</Link>.
+          <Link href="/books?state=uncategorized" className="underline">the register</Link>.
         </Note>
       ) : null}
 
@@ -211,7 +225,7 @@ export default async function PnlPage({
         {data.income.length === 0 && data.expenses.length === 0 ? (
           <Empty>
             Nothing categorized in {year} yet. <Link href="/imports" className="underline">Import a statement</Link> and
-            categorize it in <Link href="/review" className="underline">Review</Link>.
+            categorize it in <Link href="/books?state=uncategorized" className="underline">the register</Link>.
           </Empty>
         ) : (
           <div className="overflow-x-auto">

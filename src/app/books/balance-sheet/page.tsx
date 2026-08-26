@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { getBalanceSheet } from '@/lib/books-queries';
 import { BooksTabs } from '@/components/BooksTabs';
+import { FilterBar } from '@/components/FilterBar';
 import { ExportButton } from '@/components/ExportButton';
 import { Empty, Explainer, Money, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
 
@@ -66,22 +67,28 @@ export default async function BalanceSheetPage({
         </div>
       </Explainer>
 
-      <Panel title="Basis">
-        <form method="get" className="grid grid-cols-12 gap-3">
-          <div className="col-span-12 sm:col-span-4">
-            <label className="mb-1 block text-[11px] uppercase tracking-wide text-muted" htmlFor="basis">Carry properties at</label>
-            <select id="basis" name="basis" defaultValue={basis}>
-              <option value="market">Estimated value — what the equity is worth</option>
-              <option value="cost">Cost — what a tax return uses</option>
-            </select>
-          </div>
-          <div className="col-span-12 flex items-center pt-1">
-            <button type="submit" className="rounded-md border border-line bg-surface-2 px-3 py-1.5 text-[13px] hover:border-accent">
-              Show
-            </button>
-          </div>
-        </form>
-      </Panel>
+      <FilterBar
+        groups={[
+          {
+            label: 'Carry properties at',
+            primary: true,
+            options: [
+              {
+                label: 'Estimated value',
+                href: '/books/balance-sheet?basis=market',
+                active: basis === 'market',
+                hint: 'What the equity is actually worth',
+              },
+              {
+                label: 'Cost',
+                href: '/books/balance-sheet?basis=cost',
+                active: basis === 'cost',
+                hint: 'What a tax return uses',
+              },
+            ],
+          },
+        ]}
+      />
 
       {sheet.warnings.map((warning) => (
         <Note key={warning} tone="warn">

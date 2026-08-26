@@ -4,7 +4,7 @@ import { getPayouts } from '@/lib/payouts-queries';
 import { currentMonth } from '@/lib/queries';
 import { Badge, Empty, Money, Note, PageHeader, Panel, Td, Th } from '@/components/ui';
 import { DistributionRecorder } from '@/components/DistributionRecorder';
-import { LoanPaymentRecorder } from '@/components/LoanPaymentRecorder';
+import { SectionTabs } from '@/components/SectionTabs';
 import { addMonthsToMonth } from '@/lib/engine/dates';
 import { formatCents } from '@/lib/engine/money';
 
@@ -55,6 +55,11 @@ export default async function PayoutsPage({
         <Link href="/debt" className="underline">Debt</Link> — this page is what goes out to owners.
       </Note>
 
+      {/*
+        One panel with the houses as tabs, not a panel each. Four stacked meant
+        scrolling past three to reach the fourth, and never seeing what any of
+        the others had to distribute while deciding about one.
+      */}
       {withOwners.length === 0 ? (
         <Panel title="Owner distributions">
           <Empty>
@@ -64,26 +69,34 @@ export default async function PayoutsPage({
           </Empty>
         </Panel>
       ) : (
-        withOwners.map((property) => (
-          <Panel
-            key={property.propertyId}
-            title={property.propertyName}
-            description={
-              property.hasRollup
-                ? `Net cash for ${month}: ${formatCents(property.netCashCents)}. Split by each owner's share of distributions.`
-                : `No statement imported for ${month} yet, so net cash is unknown and the split below is zero. Import the month first, or enter the amounts by hand.`
-            }
-            actions={<span className="num text-[13px] text-muted">{formatCents(property.distributableCents)}</span>}
-          >
-            <DistributionRecorder
-              propertyId={property.propertyId}
-              propertyName={property.propertyName}
-              month={month}
-              owners={property.owners}
-              netCashCents={property.netCashCents}
-            />
-          </Panel>
-        ))
+        <Panel
+          title="Owner distributions"
+          description={`Net cash for ${month}, split by each owner's share of distributions. Pick a house to record its split; the figure beside each is what there is to distribute.`}
+        >
+          <SectionTabs
+            sections={withOwners.map((property) => ({
+              key: property.propertyId,
+              label: `${property.propertyName} · ${formatCents(property.distributableCents)}`,
+              count: property.owners.length,
+              content: (
+                <>
+                  <p className="mb-3 text-[12px] leading-relaxed text-muted">
+                    {property.hasRollup
+                      ? `Net cash for ${month}: ${formatCents(property.netCashCents)}.`
+                      : `No statement imported for ${month} yet, so net cash is unknown and the split below is zero. Import the month first, or enter the amounts by hand.`}
+                  </p>
+                  <DistributionRecorder
+                    propertyId={property.propertyId}
+                    propertyName={property.propertyName}
+                    month={month}
+                    owners={property.owners}
+                    netCashCents={property.netCashCents}
+                  />
+                </>
+              ),
+            }))}
+          />
+        </Panel>
       )}
 
       <Panel
@@ -154,7 +167,7 @@ export default async function PayoutsPage({
             distribution recorded overstates what an investor is still owed back on sale; a distribution recorded
             without a transfer understates it. Either record the missing entry in{' '}
             <Link href="/owners/capital" className="underline">Owners → Capital</Link>, or fix the category on the
-            statement row in <Link href="/review" className="underline">Review</Link>.
+            statement row in <Link href="/books" className="underline">the register</Link>.
           </Note>
         )}
       </Panel>
@@ -201,28 +214,27 @@ export default async function PayoutsPage({
                   </Td>
                 </tr>
               ))}
+              {/*
+                Left over from when the lender table shared this page: ten cells
+                in a six-column table, filled with interest figures under
+                headings that say contributed and returned. It is capital's
+                total now — the same columns, added up.
+              */}
               <tr className="border-t border-line">
                 <Td><strong>Total</strong></Td>
                 <Td />
-                <Td />
                 <Td right>
-                  <strong><Money cents={data.due.reduce((sum, d) => sum + d.interestCents, 0)} /></strong>
-                </Td>
-                <Td />
-                <Td />
-                <Td right>
-                  <strong><Money cents={data.totals.lendersCents} /></strong>
+                  <strong><Money cents={data.capital.reduce((sum, c) => sum + c.contributedCents, 0)} /></strong>
                 </Td>
                 <Td right>
-                  <strong className="num text-[12px]">
-                    {formatCents(data.due.reduce((sum, d) => sum + d.stillOwedThisYearCents, 0))}
-                  </strong>
-                  <span className="mt-0.5 block text-[10px] font-normal text-muted">
-                    {formatCents(data.due.reduce((sum, d) => sum + d.stillOwedToMaturityCents, 0))} to maturity
-                  </span>
+                  <strong><Money cents={data.capital.reduce((sum, c) => sum + c.profitDistributedCents, 0)} muted /></strong>
                 </Td>
-                <Td />
-                <Td />
+                <Td right>
+                  <strong><Money cents={data.capital.reduce((sum, c) => sum + c.returnedCents, 0)} /></strong>
+                </Td>
+                <Td right>
+                  <strong><Money cents={data.capital.reduce((sum, c) => sum + c.outstandingCents, 0)} /></strong>
+                </Td>
               </tr>
             </tbody>
           </table>
@@ -232,8 +244,8 @@ export default async function PayoutsPage({
       <Note tone="muted">
         An investor who put in capital for a share of profit is not a lender: the money accrues no interest and appears
         in no maturity ladder, but it is still owed back when the property sells. That is what the outstanding column
-        tracks. If a partner is instead owed interest on a fixed sum, record it as a loan and it will show under debt
-        payments above.
+        tracks. If a partner is instead owed interest on a fixed sum, record it as a loan and it belongs in{' '}
+        <Link href="/debt" className="underline">Debt</Link> instead, where the interest and the maturity are tracked.
       </Note>
     </>
   );
