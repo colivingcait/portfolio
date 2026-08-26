@@ -21,6 +21,7 @@ export function RecordSection({
   addLabel,
   form,
   defaultOpen = false,
+  bare = false,
   children,
 }: {
   title: string;
@@ -28,13 +29,23 @@ export function RecordSection({
   addLabel: string;
   form: React.ReactNode;
   defaultOpen?: boolean;
+  /** Drop the box when something else already supplies one — tabs, say. */
+  bare?: boolean;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
 
   return (
-    <section className="mb-5 rounded-lg border border-line bg-surface shadow-[0_1px_2px_rgba(16,24,40,0.05)]">
-      <div className="flex items-start justify-between gap-4 border-b border-line px-4 py-3">
+    <section
+      className={
+        bare ? '' : 'mb-5 rounded-lg border border-line bg-surface shadow-[0_1px_2px_rgba(16,24,40,0.05)]'
+      }
+    >
+      <div
+        className={`flex items-start justify-between gap-4 ${
+          bare ? 'pb-3' : 'border-b border-line px-4 py-3'
+        }`}
+      >
         <div>
           <h2 className="text-[14px] font-medium">{title}</h2>
           {description ? <p className="mt-0.5 max-w-3xl text-[12px] leading-relaxed text-muted">{description}</p> : null}
@@ -49,9 +60,13 @@ export function RecordSection({
         </button>
       </div>
 
-      {open ? <div className="border-b border-line bg-surface-2/40 p-4">{form}</div> : null}
+      {open ? (
+        <div className={bare ? 'mb-4 rounded-md bg-surface-2/40 p-4' : 'border-b border-line bg-surface-2/40 p-4'}>
+          {form}
+        </div>
+      ) : null}
 
-      <div className="p-4">{children}</div>
+      <div className={bare ? '' : 'p-4'}>{children}</div>
     </section>
   );
 }

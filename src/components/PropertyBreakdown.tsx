@@ -7,11 +7,18 @@ import { shortMonth } from '@/lib/engine/metrics-catalog';
 import { Sparkline } from '@/components/charts';
 
 /**
- * One house at a time, opened when you want it.
+ * Every house on one screen, as one table.
  *
- * The collapsed row carries the three figures you scan for — what came in, what
- * you kept, how full the house was. Everything else is a click away rather than
- * spread across a thirteen-column table you have to scroll sideways to read.
+ * This was a stack of expandable cards, which meant scrolling past three
+ * houses to reach the fourth and never seeing them side by side — and
+ * comparing houses is the only reason to look at four of them at once. A
+ * table compares; a list of cards does not.
+ *
+ * There are more measures than fit across a screen, so they come in two sets
+ * you switch between rather than thirteen columns you scroll sideways through.
+ * Narrowing to a single house in the page's own Property control turns this
+ * into that house's rooms, which is the drill-down that used to need a click
+ * per card.
  */
 
 export interface BreakdownRoom {
@@ -48,51 +55,238 @@ export interface BreakdownProperty {
   rooms: BreakdownRoom[];
 }
 
-type SortKey = 'roomNumber' | 'people' | 'medianCents' | 'lastCents';
+type ColumnSet = 'money' | 'operating';
+type RoomSort = 'roomNumber' | 'people' | 'medianCents' | 'lastCents';
 
 export function PropertyBreakdown({ properties, months }: { properties: BreakdownProperty[]; months: string[] }) {
-  const [open, setOpen] = useState<string | null>(properties.length === 1 ? properties[0].id : null);
+  const [columns, setColumns] = useState<ColumnSet>('money');
+  const single = properties.length === 1 ? properties[0] : null;
 
   return (
-    <div className="divide-y divide-line">
-      {properties.map((property) => (
-        <PropertyCard
-          key={property.id}
-          property={property}
-          months={months}
-          open={open === property.id}
-          onToggle={() => setOpen(open === property.id ? null : property.id)}
-        />
-      ))}
+    <div>
+      <div className="mb-3 flex flex-wrap items-center gap-1">
+        <span className="mr-1 text-[11px] text-muted">Showing</span>
+        {(
+          [
+            ['money', 'Money'],
+            ['operating', 'Occupancy & turnover'],
+          ] as [ColumnSet, string][]
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={key === columns}
+            onClick={() => setColumns(key)}
+            className={`rounded px-2 py-0.5 text-[11px] transition-colors ${
+              key === columns ? 'bg-surface-2 text-text' : 'text-muted hover:text-text'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+        {single ? (
+          <span className="ml-auto text-[11px] text-muted">
+            Showing {single.name}. Switch to all properties above to compare houses.
+          </span>
+        ) : null}
+      </div>
+
+      <div className="overflow-x-auto">
+        {columns === 'money' ? <MoneyTable properties={properties} /> : <OperatingTable properties={properties} />}
+      </div>
+
+      {single ? <RoomTable property={single} months={months} /> : null}
     </div>
   );
 }
 
-function PropertyCard({
-  property,
-  months,
-  open,
-  onToggle,
-}: {
-  property: BreakdownProperty;
-  months: string[];
-  open: boolean;
-  onToggle: () => void;
-}) {
-  const [sort, setSort] = useState<SortKey>('medianCents');
+function MoneyTable({ properties }: { properties: BreakdownProperty[] }) {
+  const total = (pick: (p: BreakdownProperty) => number) => properties.reduce((sum, p) => sum + pick(p), 0);
+
+  return (
+    <table>
+      <thead>
+        <tr>
+          <Th>Property</Th>
+          <Th right>Billed</Th>
+          <Th right>Collected</Th>
+          <Th right>Booking fees</Th>
+          <Th right>Service fees</Th>
+          <Th right>Host earnings</Th>
+          <Th right>Payout</Th>
+          <Th right>Per room let</Th>
+        </tr>
+      </thead>
+      <tbody>
+        {properties.map((property) => (
+          <tr key={property.id} className="hover:bg-surface-2/50">
+            <Name property={property} />
+            <Cash cents={property.netBilledCents} muted />
+            <Cash cents={property.grossCollectedCents} />
+            <Cash cents={property.bookingFeesCents} muted />
+            <Cash cents={property.serviceFeesCents} muted />
+            <Cash cents={property.hostEarningsCents} />
+            <Cash cents={property.payoutCents} />
+            <Cash cents={property.perRoomCents ?? 0} muted />
+          </tr>
+        ))}
+        <tr className="border-t border-line">
+          <td className="px-2 py-2 text-[12px]"><strong>Total</strong></td>
+          <Cash cents={total((p) => p.netBilledCents)} muted strong />
+          <Cash cents={total((p) => p.grossCollectedCents)} strong />
+          <Cash cents={total((p) => p.bookingFeesCents)} muted strong />
+          <Cash cents={total((p) => p.serviceFeesCents)} muted strong />
+          <Cash cents={total((p) => p.hostEarningsCents)} strong />
+          <Cash cents={total((p) => p.payoutCents)} strong />
+          <td />
+        </tr>
+      </tbody>
+    </table>
+  );
+}
+
+function OperatingTable({ properties }: { properties: BreakdownProperty[] }) {
+  const roomsLet = properties.reduce((sum, p) => sum + p.roomsLet, 0);
+  const roomsTotal = properties.reduce((sum, p) => sum + p.roomsTotal, 0);
+  const turnovers = properties.reduce((sum, p) => sum + p.turnovers, 0);
+  const provisional = properties.some((p) => p.turnoversProvisional);
+
+  return (
+    <table>
+      <thead>
+        <tr>
+          <Th>Property</Th>
+          <Th right>Rooms let</Th>
+          <Th right>Occupancy</Th>
+          <Th right>Turnovers</Th>
+          <Th right>Residents</Th>
+          <Th right>Collection</Th>
+          <Th right>Lost rent</Th>
+          <Th right>Fees kept</Th>
+        </tr>
+      </thead>
+      <tbody>
+        {properties.map((property) => (
+          <tr key={property.id} className="hover:bg-surface-2/50">
+            <Name property={property} />
+            <td className="px-2 py-2 text-right">
+              <span className="num text-[12px]">
+                {property.roomsLet}/{property.roomsTotal}
+              </span>
+            </td>
+            <td className="px-2 py-2 text-right">
+              <span className="num text-[12px]">
+                {property.occupancyRate === null ? '—' : `${property.occupancyRate.toFixed(0)}%`}
+              </span>
+            </td>
+            <td className="px-2 py-2 text-right">
+              <span className={`num text-[12px] ${property.turnovers > 2 ? 'text-bad' : ''}`}>
+                {property.turnovers}
+                {property.turnoversProvisional ? '+' : ''}
+              </span>
+            </td>
+            <td className="px-2 py-2 text-right">
+              <span className="num text-[12px] text-muted">{property.membersActive}</span>
+            </td>
+            <td className="px-2 py-2 text-right">
+              <span className="num text-[12px]">
+                {property.inFlight || property.collectionRate === null ? '—' : `${property.collectionRate.toFixed(0)}%`}
+              </span>
+            </td>
+            <td className="px-2 py-2 text-right">
+              {property.inFlight ? (
+                <span className="num text-[12px] text-muted">—</span>
+              ) : property.delinquencyCents > 0 ? (
+                <span className="num text-[12px] text-bad">{formatCents(property.delinquencyCents)}</span>
+              ) : (
+                <span className="num text-[12px] text-muted">all collected</span>
+              )}
+            </td>
+            <td className="px-2 py-2 text-right">
+              <span className="num text-[12px] text-muted">
+                {property.grossCollectedCents > 0
+                  ? `${((-property.feesCents / property.grossCollectedCents) * 100).toFixed(0)}%`
+                  : '—'}
+              </span>
+            </td>
+          </tr>
+        ))}
+        <tr className="border-t border-line">
+          <td className="px-2 py-2 text-[12px]"><strong>Total</strong></td>
+          <td className="px-2 py-2 text-right">
+            <strong className="num text-[12px]">{roomsLet}/{roomsTotal}</strong>
+          </td>
+          <td />
+          <td className="px-2 py-2 text-right">
+            <strong className="num text-[12px]">{turnovers}{provisional ? '+' : ''}</strong>
+          </td>
+          <td colSpan={4} />
+        </tr>
+      </tbody>
+    </table>
+  );
+}
+
+/** The house, with the ramp caveat where one applies. */
+function Name({ property }: { property: BreakdownProperty }) {
+  return (
+    <td className="px-2 py-2">
+      <span className="flex items-center gap-2">
+        <span className="inline-block h-2 w-2 shrink-0 rounded-[2px]" style={{ background: property.color }} />
+        <Link href={`/properties/${property.id}`} className="text-[12px] hover:text-accent">
+          {property.name}
+        </Link>
+        {property.outlierReason ? (
+          <span
+            className="text-[10px] text-warn"
+            title={
+              property.outlierReason === 'first_active_month'
+                ? 'First month on the platform — left out of the stabilized room rate.'
+                : 'Second month and under 70% full — still ramping.'
+            }
+          >
+            {property.outlierReason === 'first_active_month' ? 'first month' : 'ramping'}
+          </span>
+        ) : null}
+      </span>
+    </td>
+  );
+}
+
+function Th({ children, right = false }: { children: React.ReactNode; right?: boolean }) {
+  return (
+    <th
+      className={`px-2 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted ${
+        right ? 'text-right' : 'text-left'
+      }`}
+    >
+      {children}
+    </th>
+  );
+}
+
+function Cash({ cents, muted = false, strong = false }: { cents: number; muted?: boolean; strong?: boolean }) {
+  const body = formatCents(cents);
+  return (
+    <td className="px-2 py-2 text-right">
+      <span className={`num text-[12px] ${muted ? 'text-muted' : ''}`}>{strong ? <strong>{body}</strong> : body}</span>
+    </td>
+  );
+}
+
+/** One house's rooms, once a house has been picked. */
+function RoomTable({ property, months }: { property: BreakdownProperty; months: string[] }) {
+  const [sort, setSort] = useState<RoomSort>('medianCents');
   const [ascending, setAscending] = useState(false);
 
   const rooms = [...property.rooms].sort((a, b) => {
     const direction = ascending ? 1 : -1;
     if (sort === 'roomNumber') return a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true }) * direction;
-    const left = a[sort] ?? -1;
-    const right = b[sort] ?? -1;
-    return (left - right) * direction;
+    return ((a[sort] ?? -1) - (b[sort] ?? -1)) * direction;
   });
-
   const best = Math.max(0, ...property.rooms.map((room) => room.medianCents ?? 0));
 
-  const sortBy = (key: SortKey) => {
+  const sortBy = (key: RoomSort) => {
     if (key === sort) setAscending((current) => !current);
     else {
       setSort(key);
@@ -100,217 +294,79 @@ function PropertyCard({
     }
   };
 
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        className="flex w-full items-center gap-3 px-1 py-3 text-left hover:bg-surface-2/50"
-      >
-        <span className="text-[11px] text-muted">{open ? '▾' : '▸'}</span>
-        <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-[2px]" style={{ background: property.color }} />
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{property.name}</span>
+  if (property.rooms.length === 0) {
+    return <p className="mt-4 text-[12px] text-muted">No room-level lines imported for this house.</p>;
+  }
 
-        <span className="hidden gap-6 sm:flex">
-          <Figure label="Collected" value={formatCents(property.grossCollectedCents)} />
-          <Figure label="Host earnings" value={formatCents(property.hostEarningsCents)} />
-          <Figure
-            label="Occupied"
-            value={
-              property.occupancyRate === null
-                ? '—'
-                : `${property.occupancyRate.toFixed(0)}% · ${property.roomsLet}/${property.roomsTotal}`
-            }
-          />
-        </span>
-        <span className="num text-[13px] sm:hidden">{formatCents(property.hostEarningsCents)}</span>
-      </button>
-
-      {open ? (
-        <div className="px-1 pb-5">
-          <div className="mb-4 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
-            <Cell label="Billed" value={formatCents(property.netBilledCents)} hint="Dues raised, reversals netted out." />
-            <Cell label="Collected" value={formatCents(property.grossCollectedCents)} hint="Cash the platform took in." />
-            <Cell
-              label="Collection rate"
-              value={property.inFlight || property.collectionRate === null ? '—' : `${property.collectionRate.toFixed(0)}%`}
-              hint={property.inFlight ? 'Still collecting.' : 'Cash in against billed.'}
-            />
-            <Cell
-              label="Lost rent"
-              value={property.inFlight ? '—' : property.delinquencyCents > 0 ? formatCents(property.delinquencyCents) : 'all collected'}
-              tone={!property.inFlight && property.delinquencyCents > 0 ? 'bad' : 'muted'}
-              hint={property.inFlight ? 'Withheld while collecting.' : 'Billed and not collected — rent that will not arrive.'}
-            />
-
-            <Cell label="Booking fees" value={formatCents(property.bookingFeesCents)} hint="One per room that turned over." />
-            <Cell label="Service fees" value={formatCents(property.serviceFeesCents)} hint="The platform's cut of the rent." />
-            <Cell label="Host earnings" value={formatCents(property.hostEarningsCents)} hint="Collected less both fees." />
-            <Cell
-              label="Payout"
-              value={formatCents(property.payoutCents)}
-              hint={property.adjustmentsCents ? `Includes ${formatCents(property.adjustmentsCents)} of adjustments.` : 'Lands in the bank next month.'}
-            />
-
-            <Cell
-              label="Occupancy"
-              value={property.occupancyRate === null ? '—' : `${property.occupancyRate.toFixed(0)}%`}
-              hint={`Room-days let against room-days available. ${property.roomsLet} of ${property.roomsTotal} rooms let at some point.`}
-            />
-            <Cell
-              label="Turnovers"
-              value={property.turnoversProvisional ? `${property.turnovers}+` : String(property.turnovers)}
-              tone={property.turnovers > 2 ? 'bad' : 'muted'}
-              hint={
-                property.turnoversProvisional
-                  ? `Tenancies that ended. ${property.membersActive} residents billed; the count can still rise.`
-                  : `Tenancies that ended. ${property.membersActive} residents billed this month.`
-              }
-            />
-            <Cell
-              label="Per occupied room"
-              value={property.perRoomCents === null ? '—' : formatCents(property.perRoomCents)}
-              hint="Host earnings over rooms let."
-            />
-            <Cell
-              label="Fees kept"
-              value={
-                property.grossCollectedCents > 0
-                  ? `${((-property.feesCents / property.grossCollectedCents) * 100).toFixed(0)}%`
-                  : '—'
-              }
-              hint="Of what was collected."
-            />
-          </div>
-
-          {property.outlierReason ? (
-            <p className="mb-3 text-[11px] text-warn">
-              {property.outlierReason === 'first_active_month'
-                ? 'First month on the platform — left out of the stabilized room rate, because a house filling up is not a house running.'
-                : 'Second month and under 70% full — still ramping, so left out of the stabilized room rate.'}
-            </p>
-          ) : null}
-
-          {property.rooms.length === 0 ? (
-            <p className="text-[12px] text-muted">No room-level lines imported for this house.</p>
-          ) : (
-            <div className="max-w-2xl overflow-x-auto">
-              <table>
-                <thead>
-                  <tr>
-                    <SortableTh label="Room" active={sort === 'roomNumber'} ascending={ascending} onClick={() => sortBy('roomNumber')} />
-                    <SortableTh label="People" right active={sort === 'people'} ascending={ascending} onClick={() => sortBy('people')} />
-                    <th className="px-2 py-1.5 text-left text-[11px] font-medium uppercase tracking-wide text-muted">
-                      Earnings by month
-                    </th>
-                    <SortableTh label="Median" right active={sort === 'medianCents'} ascending={ascending} onClick={() => sortBy('medianCents')} />
-                    <SortableTh label="Latest" right active={sort === 'lastCents'} ascending={ascending} onClick={() => sortBy('lastCents')} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {rooms.map((room) => (
-                    <tr key={room.roomNumber} className="hover:bg-surface-2/50">
-                      <td className="px-2 py-1.5 text-[12px]">Room {room.roomNumber}</td>
-                      <td className="px-2 py-1.5 text-right">
-                        <span
-                          className={`num text-[12px] ${room.people >= 4 ? 'text-bad' : room.people >= 3 ? 'text-warn' : 'text-muted'}`}
-                          title={`${room.people} ${room.people === 1 ? 'person' : 'different people'} across ${months.length} months`}
-                        >
-                          {room.people}
-                        </span>
-                      </td>
-                      <td className="px-2 py-1">
-                        <Sparkline
-                          points={room.byMonth.map((value, i) => ({ label: shortMonth(months[i] ?? ''), value }))}
-                          color={property.color}
-                          width={150}
-                          height={26}
-                          format={(v) => formatCents(v)}
-                        />
-                      </td>
-                      <td className="px-2 py-1.5 text-right">
-                        <span className="num text-[12px]">{room.medianCents === null ? '—' : formatCents(room.medianCents)}</span>
-                        {room.medianCents !== null && best > 0 && room.medianCents < best * 0.7 ? (
-                          <span className="ml-1.5 text-[10px] text-warn">{formatCents(best - room.medianCents)} under</span>
-                        ) : null}
-                      </td>
-                      <td className="px-2 py-1.5 text-right">
-                        <span className="num text-[12px] text-muted">
-                          {room.lastCents === null ? '—' : formatCents(room.lastCents)}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          <div className="mt-3">
-            <Link href={`/properties/${property.id}`} className="text-[12px] text-muted underline hover:text-text">
-              Everything about {property.name} →
-            </Link>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function Figure({ label, value }: { label: string; value: string }) {
-  return (
-    <span className="text-right">
-      <span className="block text-[10px] uppercase tracking-wide text-muted">{label}</span>
-      <span className="num block text-[13px]">{value}</span>
-    </span>
-  );
-}
-
-function Cell({
-  label,
-  value,
-  hint,
-  tone = 'muted',
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-  tone?: 'muted' | 'bad';
-}) {
-  return (
-    <div>
-      <div className="text-[10px] uppercase tracking-wide text-muted">{label}</div>
-      <div className={`num mt-0.5 text-[14px] ${tone === 'bad' ? 'text-bad' : ''}`}>{value}</div>
-      {hint ? <div className="mt-0.5 text-[10px] leading-snug text-muted">{hint}</div> : null}
-    </div>
-  );
-}
-
-function SortableTh({
-  label,
-  right = false,
-  active,
-  ascending,
-  onClick,
-}: {
-  label: string;
-  right?: boolean;
-  active: boolean;
-  ascending: boolean;
-  onClick: () => void;
-}) {
-  return (
+  const header = (label: string, key: RoomSort, right = false) => (
     <th className={`px-2 py-1.5 text-[11px] font-medium uppercase tracking-wide ${right ? 'text-right' : 'text-left'}`}>
       <button
         type="button"
-        onClick={onClick}
-        aria-sort={active ? (ascending ? 'ascending' : 'descending') : 'none'}
-        className={`hover:text-text ${active ? 'text-text' : 'text-muted'}`}
+        onClick={() => sortBy(key)}
+        className={`hover:text-text ${sort === key ? 'text-text' : 'text-muted'}`}
       >
         {label}
-        {active ? <span className="ml-1">{ascending ? '↑' : '↓'}</span> : null}
+        {sort === key ? <span className="ml-1">{ascending ? '↑' : '↓'}</span> : null}
       </button>
     </th>
+  );
+
+  return (
+    <div className="mt-5 border-t border-line pt-4">
+      <p className="mb-2 text-[11px] leading-relaxed text-muted">
+        {property.name} room by room. The comparison that matters is between rooms under the same roof — they differ
+        by hundreds a month, and the ones that turn over most earn least.
+      </p>
+      <div className="max-w-2xl overflow-x-auto">
+        <table>
+          <thead>
+            <tr>
+              {header('Room', 'roomNumber')}
+              {header('People', 'people', true)}
+              <th className="px-2 py-1.5 text-left text-[11px] font-medium uppercase tracking-wide text-muted">
+                Earnings by month
+              </th>
+              {header('Median', 'medianCents', true)}
+              {header('Latest', 'lastCents', true)}
+            </tr>
+          </thead>
+          <tbody>
+            {rooms.map((room) => (
+              <tr key={room.roomNumber} className="hover:bg-surface-2/50">
+                <td className="px-2 py-1.5 text-[12px]">Room {room.roomNumber}</td>
+                <td className="px-2 py-1.5 text-right">
+                  <span
+                    className={`num text-[12px] ${room.people >= 4 ? 'text-bad' : room.people >= 3 ? 'text-warn' : 'text-muted'}`}
+                    title={`${room.people} ${room.people === 1 ? 'person' : 'different people'} across ${months.length} months`}
+                  >
+                    {room.people}
+                  </span>
+                </td>
+                <td className="px-2 py-1">
+                  <Sparkline
+                    points={room.byMonth.map((value, i) => ({ label: shortMonth(months[i] ?? ''), value }))}
+                    color={property.color}
+                    width={150}
+                    height={26}
+                    format={(v) => formatCents(v)}
+                  />
+                </td>
+                <td className="px-2 py-1.5 text-right">
+                  <span className="num text-[12px]">{room.medianCents === null ? '—' : formatCents(room.medianCents)}</span>
+                  {room.medianCents !== null && best > 0 && room.medianCents < best * 0.7 ? (
+                    <span className="ml-1.5 text-[10px] text-warn">{formatCents(best - room.medianCents)} under</span>
+                  ) : null}
+                </td>
+                <td className="px-2 py-1.5 text-right">
+                  <span className="num text-[12px] text-muted">
+                    {room.lastCents === null ? '—' : formatCents(room.lastCents)}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }

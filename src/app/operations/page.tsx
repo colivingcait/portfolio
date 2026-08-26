@@ -237,7 +237,7 @@ export default async function OperationsPage({
 
       <Panel
         title="Property breakdown"
-        description="Each house over the selected period. Open one for the full revenue flow and its rooms — the comparison that matters is between rooms under the same roof, where they differ by hundreds a month."
+        description="Every house side by side over the selected period, because comparing them is the only reason to look at four at once. Two sets of columns rather than thirteen you scroll sideways through. Narrow to one house in the Property control above and this becomes that house's rooms."
       >
         <PropertyBreakdown properties={breakdown} months={data.months} />
       </Panel>
