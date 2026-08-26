@@ -369,6 +369,18 @@ export async function getLoanDetail(loanId: string) {
     loan,
     terms: toLoanTerms(loan),
     payments: loan.payments.map(toLoanPayment),
+    // The stored rows keep their ids, which the engine's records deliberately
+    // do not: an id is a fact about the database, not about the loan.
+    records: loan.payments.map((payment) => ({
+      id: payment.id,
+      date: requireIsoDate(payment.date),
+      totalCents: payment.totalCents,
+      principalCents: payment.principalCents,
+      interestCents: payment.interestCents,
+      escrowCents: payment.escrowCents,
+      extraPrincipalCents: payment.extraPrincipalCents,
+      source: payment.source,
+    })),
   };
 }
 

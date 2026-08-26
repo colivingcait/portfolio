@@ -9,6 +9,7 @@ import { balanceAtDate, buildSchedule, maturityDateOf, payoffAmount, daysToMatur
 import { interestSummary, interestYear, interestYears } from '@/lib/engine/interest';
 import { formatCents } from '@/lib/engine/money';
 import { InterestAdvanceForm } from '@/components/InterestAdvanceForm';
+import { DeleteButton } from '@/components/DeleteButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,7 +20,7 @@ export default async function LoanPage({ params }: { params: Promise<{ loanId: s
 
   const asOf = todayIso();
   const thisYear = Number(asOf.slice(0, 4));
-  const { loan, terms, payments } = detail;
+  const { loan, terms, payments, records: recorded } = detail;
   const schedule = buildSchedule(terms, payments);
   const balance = balanceAtDate(terms, asOf, payments);
   const payoff = payoffAmount(terms, asOf, payments);
@@ -29,7 +30,6 @@ export default async function LoanPage({ params }: { params: Promise<{ loanId: s
   // asked: what does the year cost, and having sent them a lump, what is left.
   const interest = interestSummary(terms, payments, asOf);
   const years = interestYears(terms, payments).map((year) => interestYear(terms, payments, year));
-  const advances = payments.filter((payment) => payment.source === 'advance');
   const thisYearRow = years.find((year) => year.year === thisYear);
 
   return (
@@ -148,25 +148,63 @@ export default async function LoanPage({ params }: { params: Promise<{ loanId: s
           <InterestAdvanceForm loanId={loanId} today={asOf} />
         </div>
 
-        {advances.length > 0 ? (
-          <table className="mt-4">
-            <thead>
-              <tr>
-                <Th>Interest paid ahead</Th>
-                <Th right>Amount</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {advances.map((advance) => (
-                <tr key={`${advance.date}-${advance.interestCents}`}>
-                  <Td>
-                    <span className="num">{advance.date}</span>
-                  </Td>
-                  <Td right><Money cents={advance.interestCents} /></Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {recorded.length > 0 ? (
+          <div className="mt-5 border-t border-line pt-4">
+            <p className="mb-2 text-[11px] leading-relaxed text-muted">
+              Every payment recorded against this note. Anything mistyped can be corrected in place or removed —
+              nothing here is derived, so editing one only moves the months it touches.
+            </p>
+            <div className="overflow-x-auto">
+              <table>
+                <thead>
+                  <tr>
+                    <Th>Date</Th>
+                    <Th>Kind</Th>
+                    <Th right>Total</Th>
+                    <Th right>Principal</Th>
+                    <Th right>Interest</Th>
+                    <Th right>Escrow</Th>
+                    <Th right>Extra principal</Th>
+                    <Th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {recorded.map((entry) => (
+                    <tr key={entry.id} className="hover:bg-surface-2/50">
+                      <Td>
+                        <span className="num">{entry.date}</span>
+                      </Td>
+                      <Td>
+                        {entry.source === 'advance' ? (
+                          <Badge tone="accent">lump</Badge>
+                        ) : entry.source === 'scheduled' ? (
+                          <Badge tone="muted">scheduled</Badge>
+                        ) : (
+                          <Badge tone="muted">payment</Badge>
+                        )}
+                      </Td>
+                      <Td right><Money cents={entry.totalCents} /></Td>
+                      <Td right>{entry.principalCents ? <Money cents={entry.principalCents} /> : <span className="num text-muted">—</span>}</Td>
+                      <Td right>{entry.interestCents ? <Money cents={entry.interestCents} /> : <span className="num text-muted">—</span>}</Td>
+                      <Td right>{entry.escrowCents ? <Money cents={entry.escrowCents} /> : <span className="num text-muted">—</span>}</Td>
+                      <Td right>{entry.extraPrincipalCents ? <Money cents={entry.extraPrincipalCents} /> : <span className="num text-muted">—</span>}</Td>
+                      <Td>
+                        <span className="flex items-center gap-3">
+                          <Link
+                            href={`/edit/loanPayment/${entry.id}?back=${encodeURIComponent(`/debt/${loanId}`)}`}
+                            className="text-[12px] text-muted hover:text-text"
+                          >
+                            Edit
+                          </Link>
+                          <DeleteButton modelKey="loanPayment" id={entry.id} />
+                        </span>
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         ) : null}
       </Panel>
 

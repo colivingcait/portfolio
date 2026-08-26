@@ -6,6 +6,8 @@ import { MODELS, type ModelKey } from './models';
 import { FieldError, parseForm } from './forms';
 import { fromIsoDate, toOwnershipInterest } from './mappers';
 import { wouldCreateCycle } from './engine/ownership';
+import { recomputeMonths } from './rollups';
+import { addMonthsToMonth, monthRange, type MonthKey } from './engine/dates';
 
 export interface ActionResult {
   ok: boolean;
@@ -111,6 +113,58 @@ async function validate(modelKey: ModelKey, id: string | null, data: Record<stri
   }
 }
 
+/**
+ * How far forward a change to a loan reaches.
+ *
+ * A payment does not only alter its own month. Interest settles the oldest
+ * unpaid period first, so a cheque recorded — or corrected, or removed —
+ * changes what is owed for every month after it too. Three years is past the
+ * end of any note here and cheap enough to be worth not having to think about.
+ */
+const REACH_MONTHS = 36;
+
+function monthsFrom(date: Date | string): MonthKey[] {
+  const iso = typeof date === 'string' ? date : date.toISOString().slice(0, 10);
+  const month = iso.slice(0, 7);
+  return monthRange(month, addMonthsToMonth(month, REACH_MONTHS));
+}
+
+/**
+ * The stored monthly figures a record makes stale.
+ *
+ * Read before the write as well as after it: correcting a payment's date
+ * leaves the month it used to sit in just as wrong as the one it moves to.
+ */
+async function staleMonths(modelKey: ModelKey, id: string): Promise<{ propertyId: string; months: MonthKey[] } | null> {
+  if (modelKey === 'loanPayment') {
+    const payment = await prisma.loanPayment.findUnique({
+      where: { id },
+      select: { date: true, loan: { select: { propertyId: true } } },
+    });
+    return payment ? { propertyId: payment.loan.propertyId, months: monthsFrom(payment.date) } : null;
+  }
+
+  if (modelKey === 'loan') {
+    const loan = await prisma.loan.findUnique({ where: { id }, select: { propertyId: true, startDate: true } });
+    return loan ? { propertyId: loan.propertyId, months: monthsFrom(loan.startDate) } : null;
+  }
+
+  return null;
+}
+
+async function rebuild(...stale: ({ propertyId: string; months: MonthKey[] } | null)[]): Promise<void> {
+  const byProperty = new Map<string, Set<MonthKey>>();
+  for (const entry of stale) {
+    if (!entry) continue;
+    const months = byProperty.get(entry.propertyId) ?? new Set<MonthKey>();
+    for (const month of entry.months) months.add(month);
+    byProperty.set(entry.propertyId, months);
+  }
+  for (const [propertyId, months] of byProperty) {
+    await recomputeMonths(propertyId, [...months]);
+  }
+}
+
 export async function saveRecord(
   modelKey: ModelKey,
   id: string | null,
@@ -124,10 +178,16 @@ export async function saveRecord(
     const data = toPrismaData(modelKey, parsed);
     await validate(modelKey, id, data);
 
+    // Where the record moved, the month it left is as stale as the one it
+    // arrived in, so both are collected.
+    const before = id ? await staleMonths(modelKey, id) : null;
+
     const delegate = DELEGATES[modelKey]();
     const row = id
       ? await delegate.update({ where: { id }, data })
       : await delegate.create({ data });
+
+    await rebuild(before, await staleMonths(modelKey, row.id));
 
     revalidatePath('/', 'layout');
     return { ok: true, id: row.id };
@@ -141,7 +201,10 @@ export async function saveRecord(
 
 export async function deleteRecord(modelKey: ModelKey, id: string): Promise<ActionResult> {
   try {
+    // Read before deleting: afterwards there is nothing left to ask.
+    const stale = await staleMonths(modelKey, id);
     await DELEGATES[modelKey]().delete({ where: { id } });
+    await rebuild(stale);
     revalidatePath('/', 'layout');
     return { ok: true };
   } catch (error) {

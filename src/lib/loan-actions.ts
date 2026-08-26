@@ -5,6 +5,7 @@ import { prisma } from './db';
 import { fromIsoDate } from './mappers';
 import { parseMoney } from './forms';
 import { recomputeMonths } from './rollups';
+import { addMonthsToMonth, monthRange } from './engine/dates';
 
 /**
  * Interest paid ahead of when it falls due.
@@ -50,32 +51,14 @@ export async function recordInterestAdvance(
   return { ok: true };
 }
 
-export async function deleteLoanPayment(paymentId: string): Promise<{ ok: boolean }> {
-  const payment = await prisma.loanPayment.findUnique({
-    where: { id: paymentId },
-    include: { loan: { select: { propertyId: true } } },
-  });
-  if (!payment) return { ok: false };
-
-  await prisma.loanPayment.delete({ where: { id: paymentId } });
-  await recomputeMonths(payment.loan.propertyId, monthsTouched(payment.date.toISOString().slice(0, 10)));
-  revalidatePath('/', 'layout');
-  return { ok: true };
-}
-
 /**
- * The month of the payment and the two years after it.
+ * The month of the payment and three years after it.
  *
  * An advance changes what is owed for every month it reaches, not just its
- * own, so recomputing only its month would leave the ones it covers still
- * showing the debt service it has already met.
+ * own, so recomputing only its month would leave the ones it settles still
+ * showing debt service it has already met.
  */
 function monthsTouched(date: string): string[] {
-  const [year, month] = [Number(date.slice(0, 4)), Number(date.slice(5, 7))];
-  const months: string[] = [];
-  for (let i = 0; i < 36; i += 1) {
-    const total = (month - 1) + i;
-    months.push(`${year + Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, '0')}`);
-  }
-  return months;
+  const month = date.slice(0, 7);
+  return monthRange(month, addMonthsToMonth(month, 36));
 }
