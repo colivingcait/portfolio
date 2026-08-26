@@ -67,7 +67,8 @@ export default async function BooksPage({
         The register — one row per bank line, across every property and account, whatever state it is in. A row with no
         category yet carries the tools for filing it: the fragment of the payee a rule should match on, how many other
         rows that would catch, and whether to remember it. A row already filed carries the tools for revising it —
-        change the category, split it across two, leave a note.
+        change the category, split it across two, leave a note. A row a rule filed at import says so until
+        someone agrees with it — that is what <strong>Confirm</strong> does, and it changes no figure.
         <div className="mt-1.5">
           Change anything here and the month&apos;s rollups rebuild immediately, so the P&amp;L, the Schedule E and the
           returns all move with it. Nothing is left showing the old answer. An <strong>uncategorized</strong> row is
@@ -75,6 +76,36 @@ export default async function BooksPage({
           and it will look finished either way, which is exactly the danger.
         </div>
       </Explainer>
+
+      {/*
+        The backlog was invisible. Merging Review into the register was right —
+        a bank line should not appear to move house the moment it gets a
+        category — but it left the rows that still need a person buried in a
+        hundred that do not, with nothing at the top saying how many. These are
+        the two piles worth a click, with their counts, before any filter.
+      */}
+      <div className="mb-4 flex flex-wrap items-center gap-1 text-[13px]">
+        {([
+          { key: 'all', label: 'Everything', count: null },
+          { key: 'uncategorized', label: 'To file', count: data.uncategorized },
+          { key: 'unconfirmed', label: 'Filed by rule, not checked', count: data.unconfirmed },
+          { key: 'categorized', label: 'Filed', count: null },
+          { key: 'split', label: 'Split', count: null },
+        ] as const).map((chip) => (
+          <Link
+            key={chip.key}
+            href={linkTo({ state: chip.key === 'all' ? undefined : chip.key, page: '1' })}
+            className={`rounded-md px-2.5 py-1 ${
+              (filters.state ?? 'all') === chip.key ? 'bg-surface-2 text-text' : 'text-muted hover:text-text'
+            }`}
+          >
+            {chip.label}
+            {chip.count !== null ? (
+              <span className={`ml-1.5 text-[11px] ${chip.count === 0 ? 'text-muted' : 'text-warn'}`}>{chip.count}</span>
+            ) : null}
+          </Link>
+        ))}
+      </div>
 
       <Panel title="Filter">
         <form method="get" className="grid grid-cols-12 gap-3">
@@ -105,6 +136,7 @@ export default async function BooksPage({
             <select id="state" name="state" defaultValue={filters.state ?? 'all'}>
               <option value="all">Everything</option>
               <option value="uncategorized">Uncategorized only</option>
+              <option value="unconfirmed">Filed by rule, not checked</option>
               <option value="categorized">Categorized only</option>
               <option value="split">Split only</option>
             </select>

@@ -13,8 +13,11 @@ export interface TransactionFilters {
   propertyId?: string;
   accountId?: string;
   categoryKey?: string;
-  /** 'uncategorized' for rows with no category yet, 'split' for containers. */
-  state?: 'all' | 'uncategorized' | 'categorized' | 'split';
+  /**
+   * 'uncategorized' for rows with no category yet, 'unconfirmed' for rows a
+   * rule filed that nobody has looked at, 'split' for containers.
+   */
+  state?: 'all' | 'uncategorized' | 'unconfirmed' | 'categorized' | 'split';
   from?: string;
   to?: string;
   search?: string;
@@ -64,6 +67,8 @@ export interface RegisterPage {
   accounts: { value: string; label: string }[];
   /** Rows still unfiled, across everything — not just what the filter matched. */
   uncategorized: number;
+  /** Filed by a rule at import and never looked at. Same caveat: unfiltered. */
+  unconfirmed: number;
 }
 
 const PAGE_SIZE = 100;
@@ -88,6 +93,7 @@ export async function getRegister(filters: TransactionFilters): Promise<Register
     // Pieces of a split are shown under their parent, never as rows of their own.
     splitParentId: null,
     ...(filters.state === 'uncategorized' ? { categoryKey: null, splits: { none: {} } } : {}),
+    ...(filters.state === 'unconfirmed' ? { NOT: { categoryKey: null }, confirmed: false } : {}),
     ...(filters.state === 'categorized' ? { NOT: { categoryKey: null } } : {}),
     ...(filters.state === 'split' ? { splits: { some: {} } } : {}),
     ...(filters.categoryKey ? { categoryKey: filters.categoryKey } : {}),
@@ -117,7 +123,7 @@ export async function getRegister(filters: TransactionFilters): Promise<Register
       : {}),
   };
 
-  const [rows, total, sums, properties, accounts, uncategorized] = await Promise.all([
+  const [rows, total, sums, properties, accounts, uncategorized, unconfirmed] = await Promise.all([
     prisma.bankTransaction.findMany({
       where,
       include: {
@@ -137,6 +143,7 @@ export async function getRegister(filters: TransactionFilters): Promise<Register
     // Deliberately unfiltered: the backlog is a fact about the books, not about
     // whatever the filter happens to be narrowed to.
     prisma.bankTransaction.count({ where: { splitParentId: null, categoryKey: null, splits: { none: {} } } }),
+    prisma.bankTransaction.count({ where: { splitParentId: null, NOT: { categoryKey: null }, confirmed: false } }),
   ]);
 
   const reversals = await findReversalHints(rows);
@@ -177,6 +184,7 @@ export async function getRegister(filters: TransactionFilters): Promise<Register
     properties: properties.map((p) => ({ value: p.id, label: p.name })),
     accounts: accounts.map((a) => ({ value: a.id, label: `${a.property.name} · ${a.label}` })),
     uncategorized,
+    unconfirmed,
   };
 }
 

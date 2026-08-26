@@ -190,3 +190,38 @@ export async function recategorizeMany(ids: string[], categoryKey: string): Prom
   revalidatePath('/', 'layout');
   return { ok: true, changed: rows.length };
 }
+
+/**
+ * Accept the category a rule put on a row at import.
+ *
+ * A rule-matched row arrives with a category already on it and `confirmed`
+ * false: the machine filed it, nobody looked. Nothing ever asked to look,
+ * because Review only listed rows with no category at all — so a rule that
+ * started matching the wrong payee filed months of rows and never said so.
+ * This is the human saying yes. It changes no figure, so no rollup is rebuilt.
+ */
+export async function confirmCategory(transactionId: string): Promise<BooksResult> {
+  const existing = await prisma.bankTransaction.findUnique({
+    where: { id: transactionId },
+    select: { categoryKey: true },
+  });
+  if (!existing) return { ok: false, error: 'That transaction no longer exists.' };
+  if (existing.categoryKey === null) {
+    return { ok: false, error: 'Nothing to confirm — this row has no category yet.' };
+  }
+
+  await prisma.bankTransaction.update({ where: { id: transactionId }, data: { confirmed: true } });
+  revalidatePath('/', 'layout');
+  return { ok: true };
+}
+
+/** The same yes, for a page of rows a rule filed the same way. */
+export async function confirmMany(ids: string[]): Promise<BooksResult & { changed: number }> {
+  if (ids.length === 0) return { ok: true, changed: 0 };
+  const result = await prisma.bankTransaction.updateMany({
+    where: { id: { in: ids }, NOT: { categoryKey: null } },
+    data: { confirmed: true },
+  });
+  revalidatePath('/', 'layout');
+  return { ok: true, changed: result.count };
+}

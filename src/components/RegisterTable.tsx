@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { RegisterRow } from './RegisterRow';
 import { ReviewRow } from './ReviewRow';
-import { recategorizeMany } from '@/lib/books-actions';
+import { confirmMany, recategorizeMany } from '@/lib/books-actions';
 import { Th } from './ui';
 import type { RegisterRow as Row } from '@/lib/books-queries';
 
@@ -31,6 +31,9 @@ export function RegisterTable({ rows, categories }: Props) {
   }
 
   const selectable = rows.filter((row) => !row.isSplit);
+  const selectedUnconfirmed = rows.filter(
+    (row) => selected.has(row.id) && !row.confirmed && row.categoryKey !== null && !row.isSplit,
+  ).length;
   const allSelected = selectable.length > 0 && selectable.every((row) => selected.has(row.id));
 
   return (
@@ -62,6 +65,28 @@ export function RegisterTable({ rows, categories }: Props) {
           >
             {pending ? '…' : 'Apply'}
           </button>
+          {/*
+            Agreeing with what a rule already chose is the commoner action on a
+            selection than changing it, and it is not the same action: it moves
+            no money between categories, so it sits apart from Apply.
+          */}
+          {selectedUnconfirmed > 0 ? (
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() =>
+                startTransition(async () => {
+                  const result = await confirmMany([...selected]);
+                  setDone(result.ok ? `Confirmed ${result.changed}.` : (result.error ?? 'Could not save'));
+                  setSelected(new Set());
+                  router.refresh();
+                })
+              }
+              className="rounded border border-line bg-surface px-2 py-0.5 hover:border-accent disabled:opacity-50"
+            >
+              Confirm {selectedUnconfirmed} as filed
+            </button>
+          ) : null}
           <button type="button" onClick={() => setSelected(new Set())} className="text-muted hover:text-text">
             clear
           </button>

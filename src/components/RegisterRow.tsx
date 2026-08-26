@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { recategorize, setMemo, splitTransaction, unsplitTransaction } from '@/lib/books-actions';
+import { confirmCategory, recategorize, setMemo, splitTransaction, unsplitTransaction } from '@/lib/books-actions';
 import { formatCents } from '@/lib/engine/money';
 
 interface Split {
@@ -64,6 +64,8 @@ export function RegisterRow(props: Props) {
       }
     });
   }
+
+  const needsConfirming = !props.confirmed && props.categoryKey !== null && !props.isSplit;
 
   const piecesTotal = pieces.reduce((sum, piece) => sum + (parseDollars(piece.amount) ?? 0), 0);
   const remaining = props.amountCents - piecesTotal;
@@ -209,24 +211,45 @@ export function RegisterRow(props: Props) {
           {props.isSplit ? (
             <span className="text-[12px] text-muted">Split into {props.splits.length}</span>
           ) : (
-            <select
-              aria-label="Category"
-              value={props.categoryKey ?? ''}
-              disabled={pending}
-              onChange={(e) => run(() => recategorize(props.id, e.target.value))}
-              className="text-[12px]"
-            >
-              <option value="">— uncategorized —</option>
-              {props.categories.map((c) => (
-                <option key={c.key} value={c.key}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
+            <>
+              <select
+                aria-label="Category"
+                value={props.categoryKey ?? ''}
+                disabled={pending}
+                onChange={(e) => run(() => recategorize(props.id, e.target.value))}
+                className="text-[12px]"
+              >
+                <option value="">— uncategorized —</option>
+                {props.categories.map((c) => (
+                  <option key={c.key} value={c.key}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+              {/*
+                A rule filed this one at import and nobody has looked. It counts
+                in every report either way, so the marker is not a warning — it
+                is the difference between a category a machine chose and one a
+                person agreed with. Changing the category confirms it too.
+              */}
+              {needsConfirming ? (
+                <div className="mt-0.5 text-[10px] text-warn">filed by rule · not checked</div>
+              ) : null}
+            </>
           )}
         </td>
         <td className="border-b border-line/60 px-2 py-2">
           <div className="flex items-center gap-2.5 text-[11px] text-muted">
+            {needsConfirming ? (
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => run(() => confirmCategory(props.id))}
+                className="rounded border border-line px-2 py-0.5 text-[11px] text-text hover:border-accent disabled:opacity-40"
+              >
+                Confirm
+              </button>
+            ) : null}
             <button type="button" onClick={() => setMemoOpen((open) => !open)} className="hover:text-accent">
               {props.memo ? 'Edit note' : 'Note'}
             </button>
